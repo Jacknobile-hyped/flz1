@@ -103,12 +103,10 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   Future<void> _initIAP() async {
     if (!Platform.isIOS) {
       _appendIAPLog('⚠️ IAP only available on iOS devices');
-      _showInfoSnackBar('⚠️ IAP only available on iOS devices');
       return; // Limita agli iPhone/iPad
     }
     
     _appendIAPLog('🚀 Initializing In-App Purchases...');
-    _showInfoSnackBar('🚀 Initializing In-App Purchases...');
     
     try {
       final available = await _inAppPurchase.isAvailable();
@@ -119,19 +117,16 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
       
       if (!available) {
         _appendIAPLog('❌ App Store not available on this device');
-        _showErrorSnackBar('❌ App Store not available on this device');
         return;
       }
       
       _appendIAPLog('✅ App Store connection established');
-      _showInfoSnackBar('✅ App Store connection established');
 
       // Ascolta gli aggiornamenti degli acquisti
       _purchaseSub = _inAppPurchase.purchaseStream.listen(
         _onPurchaseUpdated,
         onError: (Object error) {
           _appendIAPLog('Purchase stream error: $error');
-          _showErrorSnackBar('Purchase error: $error');
         },
         onDone: () {
           _appendIAPLog('Purchase stream completed');
@@ -140,20 +135,16 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
 
       // Tenta di ripristinare eventuali acquisti (utile in caso di reinstallazioni)
       _appendIAPLog('🔄 Checking for previous purchases...');
-      _showInfoSnackBar('🔄 Checking for previous purchases...');
       try {
         await _inAppPurchase.restorePurchases();
         _appendIAPLog('✅ Purchase restoration completed');
-        _showInfoSnackBar('✅ Purchase restoration completed');
       } catch (e) {
         _appendIAPLog('⚠️ No previous purchases found: $e');
-        _showInfoSnackBar('⚠️ No previous purchases found');
       }
 
       await _queryProducts();
     } catch (e) {
       _appendIAPLog('❌ Store initialization failed: $e');
-      _showErrorSnackBar('❌ Store initialization failed: $e');
     }
   }
 
@@ -164,7 +155,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
     });
     
     _appendIAPLog('🔍 Querying IAP products...');
-    _showInfoSnackBar('🔍 Querying IAP products...');
     
     try {
       // A volte la prima query può tornare vuota: aggiungiamo un retry semplice
@@ -172,37 +162,30 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
       ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_kProductIds);
       
       _appendIAPLog('📦 First query: ${response.productDetails.length} products found');
-      _showInfoSnackBar('📦 First query: ${response.productDetails.length} products found');
       
       if (response.productDetails.isEmpty && response.error == null) {
         _appendIAPLog('🔄 Retrying query in 2 seconds...');
-        _showInfoSnackBar('🔄 Retrying query in 2 seconds...');
         // piccolo backoff prima del retry
         await Future.delayed(const Duration(seconds: 2));
         response = await _inAppPurchase.queryProductDetails(_kProductIds);
         _appendIAPLog('📦 Retry query: ${response.productDetails.length} products found');
-        _showInfoSnackBar('📦 Retry query: ${response.productDetails.length} products found');
       }
       
       if (response.error != null) {
         _appendIAPLog('Products error: ${response.error!.message}');
-        _showErrorSnackBar('Products error: ${response.error!.message}');
       }
       
       if (response.productDetails.isEmpty) {
         // Alcuni ID non trovati o non approvati su App Store Connect
         if (response.notFoundIDs.isNotEmpty) {
           _appendIAPLog('❌ Products not found: ${response.notFoundIDs.join(', ')}');
-          _showErrorSnackBar('❌ Products not found: ${response.notFoundIDs.join(', ')}\n\nPossible causes:\n• Products pending Apple approval\n• Wrong Bundle ID\n• Missing IAP capability in Xcode');
         } else {
           _appendIAPLog('❌ No products available. Verify App Store Connect configuration and product state.');
-          _showErrorSnackBar('❌ No products available. Verify App Store Connect configuration and product state.');
         }
       } else {
         // Mostra i prodotti trovati
         final productNames = response.productDetails.map((p) => '${p.id}: ${p.price}').join(', ');
         _appendIAPLog('✅ Products loaded successfully: $productNames');
-        _showSuccessSnackBar('✅ Products loaded successfully:\n$productNames');
       }
       
       setState(() {
@@ -210,7 +193,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
       });
     } catch (e) {
       _appendIAPLog('❌ Failed to fetch products: $e');
-      _showErrorSnackBar('❌ Failed to fetch products: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -237,38 +219,31 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   Future<void> _startPurchaseForSelectedPlan() async {
     if (!Platform.isIOS) {
       _appendIAPLog('Available on iOS only.');
-      _showErrorSnackBar('Available on iOS only.');
       return;
     }
     if (!_storeAvailable) {
       _appendIAPLog('App Store not available.');
-      _showErrorSnackBar('App Store not available.');
       return;
     }
     if (_selectedPlan == 0) {
       _appendIAPLog('Please select a Premium plan.');
-      _showErrorSnackBar('Please select a Premium plan.');
       return;
     }
     if (_products.isEmpty) {
       _appendIAPLog('🔄 Refreshing products...');
-      _showInfoSnackBar('🔄 Refreshing products...');
       await _queryProducts();
       if (_products.isEmpty) {
         _appendIAPLog('No products available after refresh.');
-        _showErrorSnackBar('No products available.');
         return;
       }
     }
     final product = _productForSelectedPlan();
     if (product == null) {
       _appendIAPLog('Product not available for the selected plan. Selected plan: $_selectedPlan');
-      _showErrorSnackBar('Product not available for the selected plan.');
       return;
     }
 
     _appendIAPLog('💳 Starting purchase for ${product.title} (${product.id})...');
-    _showInfoSnackBar('💳 Starting purchase for ${product.title}...');
 
     setState(() {
       _isLoading = true;
@@ -282,17 +257,14 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
       _appendIAPLog('buyNonConsumable result: $success');
       if (!success) {
         _appendIAPLog('❌ Purchase not started.');
-        _showErrorSnackBar('❌ Purchase not started.');
         setState(() {
           _isLoading = false;
         });
       } else {
         _appendIAPLog('⏳ Purchase initiated, waiting for user confirmation...');
-        _showInfoSnackBar('⏳ Purchase initiated, waiting for user confirmation...');
       }
     } catch (e) {
       _appendIAPLog('❌ Purchase failed: $e');
-      _showErrorSnackBar('❌ Purchase failed: $e');
       setState(() {
         _isLoading = false;
       });
@@ -302,19 +274,16 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   Future<void> _onPurchaseUpdated(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       _appendIAPLog('📱 Purchase status update: ${purchase.status.name} for ${purchase.productID}');
-      _showInfoSnackBar('📱 Purchase status update: ${purchase.status.name} for ${purchase.productID}');
       
       switch (purchase.status) {
         case PurchaseStatus.pending:
           _appendIAPLog('⏳ Purchase pending approval...');
-          _showInfoSnackBar('⏳ Purchase pending approval...');
           setState(() {
             _isLoading = true;
           });
           break;
         case PurchaseStatus.canceled:
           _appendIAPLog('❌ Purchase cancelled by user.');
-          _showErrorSnackBar('❌ Purchase cancelled by user.');
           if (mounted) {
             setState(() {
               _isLoading = false;
@@ -327,7 +296,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
           break;
         case PurchaseStatus.error:
           _appendIAPLog('❌ Purchase error: ${purchase.error?.message ?? 'unknown error'} | Code: ${purchase.error?.code ?? 'no code'} | Details: ${purchase.error?.details ?? 'no details'}');
-          _showErrorSnackBar('❌ Purchase error: ${purchase.error?.message ?? 'unknown error'}');
           if (mounted) {
             setState(() {
               _isLoading = false;
@@ -341,7 +309,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
           _appendIAPLog('✅ Purchase ${purchase.status == PurchaseStatus.purchased ? 'completed' : 'restored'}, activating premium...');
-          _showInfoSnackBar('✅ Purchase ${purchase.status == PurchaseStatus.purchased ? 'completed' : 'restored'}, activating premium...');
           try {
             // In produzione si dovrebbe validare la ricevuta lato server
             final product = _products.firstWhere(
@@ -359,11 +326,9 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
                 _subscriptionStatus = 'active';
               });
               _appendIAPLog('🎉 Premium activated successfully! Welcome to Fluzar Pro.');
-              _showSuccessSnackBar('🎉 Premium activated successfully! Welcome to Fluzar Pro.');
             }
           } catch (e) {
             _appendIAPLog('❌ Failed to activate premium: $e');
-            _showErrorSnackBar('❌ Failed to activate premium: $e');
           } finally {
             if (purchase.pendingCompletePurchase) {
               _appendIAPLog('Completing successful purchase...');
@@ -909,7 +874,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
             slivers: [
               SliverPadding(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).size.height * 0.05,
+                  top: MediaQuery.of(context).size.height * 0.05 + 25,
                 ),
                 sliver: SliverToBoxAdapter(
                   child: _buildHeroHeader(context),
@@ -920,7 +885,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
               ),
               SliverPadding(
                 padding: EdgeInsets.only(
-                  bottom: 180 + MediaQuery.of(context).size.height * 0.13,
+                  bottom: 120 + MediaQuery.of(context).size.height * 0.13,
                 ),
               ),
             ],
@@ -940,7 +905,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
     final theme = Theme.of(context);
 
     return SizedBox(
-      height: 250,
+      height: 200,
       child: SafeArea(
         child: Center(
           child: Container(
@@ -960,27 +925,58 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'Unlock the full potential',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    shadows: [
-                      Shadow(
-                        color: Colors.black.withOpacity(0.3),
-                        offset: const Offset(0, 2),
-                        blurRadius: 4,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Unlock full potential',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withOpacity(0.3),
+                              offset: const Offset(0, 2),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    if (Platform.isIOS) ...[
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => _showIAPLogsDialog(),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.bug_report_outlined,
+                            size: 16,
+                            color: Colors.white.withOpacity(0.8),
+                          ),
+                        ),
                       ),
                     ],
-                  ),
-                  textAlign: TextAlign.center,
+                  ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 6),
                 Text(
                   'More power, more automation, more visibility with Fluzar pro',
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.bodyLarge?.copyWith(
                     color: Colors.white.withOpacity(0.9),
                     fontWeight: FontWeight.w500,
+                    fontSize: 14,
                     letterSpacing: 0.5,
                   ),
                   textAlign: TextAlign.center,
@@ -1093,6 +1089,11 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
               'icon': Icons.free_breakfast,
               'isAvailable': true,
             },
+          {
+            'text': 'Save 28%',
+            'icon': Icons.savings,
+            'isAvailable': true,
+          },
         ],
       },
     ];
@@ -1338,26 +1339,22 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!_isUserPremiumFromProfile || _selectedPlan != 0)
+            if ((!_isUserPremiumFromProfile || _selectedPlan != 0) && !_isMenuExpanded)
               GestureDetector(
                 onTap: () {
                   setState(() {
                     if (!(_isUserPremiumFromProfile && _selectedPlan == 0)) {
-                      _isMenuExpanded = !_isMenuExpanded;
+                      _isMenuExpanded = true;
                     }
                   });
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: AnimatedRotation(
-                    duration: const Duration(milliseconds: 300),
-                    turns: _isMenuExpanded ? 0.5 : 0,
-                    child: Icon(
-                      Icons.keyboard_arrow_up,
-                      color: isDark ? Colors.white : Colors.black87,
-                      size: 20,
-                    ),
+                  child: Icon(
+                    Icons.keyboard_arrow_up,
+                    color: isDark ? Colors.white : Colors.black87,
+                    size: 20,
                   ),
                 ),
               ),
@@ -1370,64 +1367,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
               ),
               secondChild: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              selectedPlan['title'] as String,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            if (selectedPlan['savings'] != null) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                selectedPlan['savings'] as String,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.primaryColor,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          ShaderMask(
-                            shaderCallback: (Rect bounds) {
-                              return const LinearGradient(
-                                colors: [
-                                  Color(0xFF667eea),
-                                  Color(0xFF764ba2),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                transform: GradientRotation(135 * 3.14159 / 180),
-                              ).createShader(bounds);
-                            },
-                            child: Text(
-                              selectedPlan['price'] as String,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            selectedPlan['period'] as String,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark ? Colors.grey[400] : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -1473,38 +1412,26 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  // Pulsante per visualizzare i log IAP
-                  if (Platform.isIOS) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _showIAPLogsDialog(),
-                        icon: Icon(
-                          Icons.bug_report_outlined,
-                          size: 16,
-                          color: isDark ? Colors.white70 : Colors.black54,
-                        ),
-                        label: Text(
-                          'View IAP Debug Logs (${_iapLogs.length})',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          side: BorderSide(
-                            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                          ),
-                          backgroundColor: isDark ? Colors.grey[800] : Colors.grey[50],
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
+                  const SizedBox(height: 12),
+                  // Messaggi informativi sui trial e prezzi
+                  if (_selectedPlan == 1 && !_hasUsedTrial)
+                    Text(
+                      'Free 3-day trial, then €6.99/month with automatic renewal.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        fontSize: 11,
                       ),
+                      textAlign: TextAlign.center,
+                    )
+                  else if (_selectedPlan == 2 && !_hasUsedTrial)
+                    Text(
+                      'Free 3-day trial, then €59.99/annual with automatic renewal.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        fontSize: 11,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                  ],
                   SizedBox(height: widget.suppressExtraPadding ? 0 : MediaQuery.of(context).size.height * 0.10),
                 ],
               ),

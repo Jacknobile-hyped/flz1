@@ -4004,7 +4004,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
                     ),
                     child: ClipOval(
                       child: Image.asset(
-                        'assets/app_icon.png',
+                        'assets/onboarding/circleICON.png',
                         width: 32,
                         height: 32,
                         fit: BoxFit.cover,

@@ -174,7 +174,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   };
 
   // ChatGPT Configuration
-  static const String _apiKey = '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';
+  static const String _apiKey = '';
   static const int _maxTokens = 150;
 
   Map<String, UploadStatus> _uploadStatuses = {};
@@ -2549,16 +2549,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       if (photosGranted || cameraGranted) {
         status = PermissionStatus.granted;
       } else {
-        print('[PERMISSION] iOS: nessun permesso già concesso, chiedo in sequenza...');
-        // Prima richiedi accesso alle foto (per galleria)
-        status = await Permission.photos.request();
-        print('[PERMISSION] iOS dopo richiesta photos: ${status.toString()}');
-        
-        // Se non concesso, prova con la fotocamera
-        if (!status.isGranted) {
-          status = await Permission.camera.request();
-          print('[PERMISSION] iOS dopo richiesta camera: ${status.toString()}');
-        }
+        print('[PERMISSION] iOS: nessun permesso già concesso, apro direttamente la tendina per permettere selezione media...');
+        // Su iOS, non richiediamo permessi qui - lasciamo che image_picker gestisca i permessi quando necessario
+        // Questo permette all'utente di vedere la tendina di selezione e accettare i permessi reali del sistema
+        status = PermissionStatus.granted;
       }
     } else {
       print('[PERMISSION] Altro OS: chiedo permesso photos e camera...');
@@ -2840,8 +2834,16 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         }
       }
     } else if (isIOS) {
-      print('[PERMISSION] iOS: richiedo permesso galleria foto...');
-      status = await Permission.photos.request();
+      print('[PERMISSION] iOS: controllo se permesso galleria già concesso...');
+      final photosGranted = await Permission.photos.isGranted;
+      if (photosGranted) {
+        status = PermissionStatus.granted;
+      } else {
+        print('[PERMISSION] iOS: permesso non concesso, ma lascio che image_picker gestisca la richiesta...');
+        // Su iOS, non richiediamo il permesso qui - lasciamo che image_picker lo gestisca
+        // Questo evita il popup "Permission required" e permette i dialoghi di sistema reali
+        status = PermissionStatus.granted;
+      }
     } else {
       status = await Permission.photos.request();
     }
@@ -2861,9 +2863,27 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   /// Richiede specificamente il permesso per accedere alla fotocamera
   Future<bool> _requestCameraPermission() async {
     PermissionStatus status;
+    bool isIOS = false;
     
-    print('[PERMISSION] Richiedo permesso fotocamera...');
-    status = await Permission.camera.request();
+    try {
+      isIOS = Theme.of(context).platform == TargetPlatform.iOS;
+    } catch (_) {}
+    
+    if (isIOS) {
+      print('[PERMISSION] iOS: controllo se permesso fotocamera già concesso...');
+      final cameraGranted = await Permission.camera.isGranted;
+      if (cameraGranted) {
+        status = PermissionStatus.granted;
+      } else {
+        print('[PERMISSION] iOS: permesso non concesso, ma lascio che image_picker gestisca la richiesta...');
+        // Su iOS, non richiediamo il permesso qui - lasciamo che image_picker lo gestisca
+        // Questo evita il popup "Permission required" e permette i dialoghi di sistema reali
+        status = PermissionStatus.granted;
+      }
+    } else {
+      print('[PERMISSION] Android/Altro: richiedo permesso fotocamera...');
+      status = await Permission.camera.request();
+    }
 
     if (!status.isGranted) {
       if (status.isPermanentlyDenied) {
@@ -7253,10 +7273,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   ? Container(
                   padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? Colors.grey[800] : Colors.white,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: Colors.grey[200]!,
+                      color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
                       width: 1,
                     ),
                   ),

@@ -2033,7 +2033,7 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
         ),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
             padding: const EdgeInsets.all(14),
@@ -2081,6 +2081,7 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
                 color: theme.colorScheme.onSurface,
                 height: 1.4,
                 fontWeight: FontWeight.w500,
+                fontSize: 12.0,
               ),
             ),
           ),
@@ -2567,7 +2568,7 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
                                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
                                   child: Text(
-                                    'Delete all',
+                                    'Delete',
                                     style: TextStyle(
                                       color: Colors.red[600],
                                       fontWeight: FontWeight.w600,
@@ -3248,7 +3249,7 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
                                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
                                   child: Text(
-                                    'Delete all',
+                                    'Delete',
                                     style: TextStyle(
                                       color: Colors.red[600],
                                       fontWeight: FontWeight.w600,

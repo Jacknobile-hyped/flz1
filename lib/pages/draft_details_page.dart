@@ -2591,7 +2591,7 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
       width: double.infinity,
       height: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white, // Sfondo bianco invece di theme.scaffoldBackgroundColor
+        color: theme.scaffoldBackgroundColor, // Usa il colore del tema per la dark mode
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),

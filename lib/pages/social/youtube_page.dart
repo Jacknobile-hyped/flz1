@@ -469,20 +469,11 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Select YouTube Channel',
+                            'Select Channel',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                               color: Colors.grey[800],
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Choose a channel to connect to Fluzar',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.normal,
-                              color: Colors.grey[600],
                             ),
                           ),
                         ],

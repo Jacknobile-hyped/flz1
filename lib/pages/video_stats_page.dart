@@ -509,8 +509,16 @@ class VideoStatsService {
         print('[TWITTER] ❌ Twitter account info not found for this video');
         throw Exception('Twitter account info not found for this video');
       }
-      final accountsList = accountsSnapshot.value as List<dynamic>?;
-      if (accountsList == null || accountsList.isEmpty) {
+      final dynamic rawAccounts = accountsSnapshot.value;
+      List<dynamic> accountsList;
+      if (rawAccounts is List) {
+        accountsList = rawAccounts;
+      } else if (rawAccounts is Map) {
+        accountsList = (rawAccounts as Map).values.toList();
+      } else {
+        accountsList = const [];
+      }
+      if (accountsList.isEmpty) {
         print('[TWITTER] ❌ No Twitter account linked to this video');
         throw Exception('No Twitter account linked to this video');
       }
@@ -653,7 +661,7 @@ class VideoStatsService {
   }
 }
 class ChatGptService {
-  static const String apiKey = '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';
+  static const String apiKey = '';
   static const String apiUrl = 'https://api.openai.com/v1/chat/completions';
 
   // Funzione per calcolare i token utilizzati
@@ -4712,8 +4720,16 @@ These questions should be relevant to your response and help users explore relat
           );
         }
         
-        final messagesData = snapshot.data!.snapshot.value as List<dynamic>?;
-        if (messagesData == null || messagesData.isEmpty) {
+        final dynamic rawMessages = snapshot.data!.snapshot.value;
+        List<dynamic> messagesData;
+        if (rawMessages is List) {
+          messagesData = rawMessages;
+        } else if (rawMessages is Map) {
+          messagesData = (rawMessages as Map).values.toList();
+        } else {
+          messagesData = const [];
+        }
+        if (messagesData.isEmpty) {
           // Se la lista è vuota, mostra comunque la lista vuota
           return ListView.builder(
             controller: _chatScrollController,
@@ -7427,10 +7443,24 @@ These questions should be relevant to your response and help users explore relat
 
   // Ottiene le piattaforme selezionate per questo video dal database Firebase
   Set<String> _getSelectedPlatforms() {
-    final platforms = widget.video['platforms'] as List<dynamic>?;
-    if (platforms != null && platforms.isNotEmpty) {
-      final selectedPlatforms = platforms.map((platform) => platform.toString().toLowerCase()).toSet();
-      return selectedPlatforms;
+    final dynamic raw = widget.video['platforms'];
+    if (raw != null) {
+      final List<String> platforms = <String>[];
+      if (raw is List) {
+        for (final item in raw) {
+          if (item != null) platforms.add(item.toString());
+        }
+      } else if (raw is Map) {
+        for (final value in (raw as Map).values) {
+          if (value != null) platforms.add(value.toString());
+        }
+      } else if (raw is String) {
+        platforms.add(raw);
+      }
+      if (platforms.isNotEmpty) {
+        final selectedPlatforms = platforms.map((platform) => platform.toLowerCase()).toSet();
+        return selectedPlatforms;
+      }
     }
     // Se non disponibile localmente, prova a recuperare dal database Firebase
     _loadPlatformsFromFirebase();
@@ -7460,12 +7490,24 @@ These questions should be relevant to your response and help users explore relat
         final snapshot = await videoRef.child('platforms').get();
         
         if (snapshot.exists) {
-          final platforms = snapshot.value as List<dynamic>?;
-          
-          if (platforms != null && platforms.isNotEmpty) {
+          final dynamic raw = snapshot.value;
+          final List<String> platforms = <String>[];
+          if (raw is List) {
+            for (final item in raw) {
+              if (item != null) platforms.add(item.toString());
+            }
+          } else if (raw is Map) {
+            // iOS Firebase can return maps for arrays; collect values
+            for (final value in (raw as Map).values) {
+              if (value != null) platforms.add(value.toString());
+            }
+          } else if (raw is String) {
+            platforms.add(raw);
+          }
+          if (platforms.isNotEmpty) {
             widget.video['platforms'] = platforms;
             if (mounted) setState(() {});
-        } else {
+          } else {
           // Fallback: deduci le piattaforme dal nuovo formato (accounts in sottocartelle)
           try {
             final accountsRef = videoRef.child('accounts');
@@ -7614,9 +7656,11 @@ These questions should be relevant to your response and help users explore relat
       print('DEBUG: IDs dal video - TikTok: $tikTokId, YouTube: $youtubeId, Instagram: $instagramId');
       print('DEBUG: IDs dal video - Threads: $threadsId, Facebook: $facebookId, Twitter: $twitterId');
       
-      // Recupera i dati dell'utente da Firebase
-      final userSnapshot = await databaseRef.child('users/$userId').get();
-      
+      // Recupera i dati dell'utente da Firebase (nuovo formato -> fallback al vecchio)
+      DataSnapshot userSnapshot = await databaseRef.child('users').child('users').child(userId).get();
+      if (!userSnapshot.exists) {
+        userSnapshot = await databaseRef.child('users').child(userId).get();
+      }
       if (!userSnapshot.exists) {
         print('DEBUG: Utente non trovato in Firebase');
         _mostraErrore('Dati utente non disponibili');
@@ -8259,9 +8303,11 @@ These questions should be relevant to your response and help users explore relat
       // Riferimento al database Firebase
       final databaseRef = FirebaseDatabase.instance.ref();
       
-      // Ottieni i dati dell'utente
-      final userSnapshot = await databaseRef.child('users/$userId').get();
-      
+      // Ottieni i dati dell'utente (nuovo formato -> fallback al vecchio)
+      DataSnapshot userSnapshot = await databaseRef.child('users').child('users').child(userId).get();
+      if (!userSnapshot.exists) {
+        userSnapshot = await databaseRef.child('users').child(userId).get();
+      }
       if (userSnapshot.exists) {
         final userData = userSnapshot.value as Map<dynamic, dynamic>;
         

@@ -301,9 +301,9 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     
     _loadUserCredits();
     _loadVideos();
-    _loadSocialAccounts();
+    loadSocialAccounts();
     _loadUpcomingScheduledPosts(); // Load upcoming scheduled posts
-    _checkUserProgress();
+    checkUserProgress();
     
     // Inizializza il video player per la card AI Videoclip
     _initializeAiVideoclipVideo();
@@ -477,7 +477,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ).then((_) {
               // Check progress when returning, ma non ricarichiamo i crediti
-              _checkUserProgress();
+              checkUserProgress();
             });
           },
         );
@@ -485,7 +485,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _checkUserProgress() async {
+  Future<void> checkUserProgress() async {
     if (_currentUser == null || !mounted) return;
 
     try {
@@ -697,7 +697,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _loadSocialAccounts() async {
+  Future<void> loadSocialAccounts() async {
     if (_currentUser == null || !mounted) return;
 
     try {
@@ -1524,8 +1524,8 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
         'onTap': () {
           Navigator.pushNamed(context, '/accounts').then((_) {
             // Refresh accounts and check progress when returning
-            _loadSocialAccounts();
-            _checkUserProgress();
+            loadSocialAccounts();
+            checkUserProgress();
           });
         },
         'key': _connectAccountsKey,
@@ -1540,7 +1540,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
           NavigationService.navigateToUpload(context);
           // Refresh videos and check progress when returning
           _loadVideos();
-          _checkUserProgress();
+          checkUserProgress();
         },
         'key': _uploadVideoKey,
         'icon': Icons.video_library,
@@ -1562,7 +1562,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ).then((_) {
             // Check progress when returning, ma non ricarichiamo i crediti
-            _checkUserProgress();
+            checkUserProgress();
           });
         },
         'key': null,
@@ -2224,7 +2224,11 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 theme,
                 isAddButton: true,
                 onTap: () {
-                  Navigator.pushNamed(context, '/accounts');
+                  Navigator.pushNamed(context, '/accounts').then((_) {
+                    // Refresh accounts and check progress when returning
+                    loadSocialAccounts();
+                    checkUserProgress();
+                  });
                 },
               );
             }
@@ -2923,7 +2927,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     // Verranno caricati solo quando l'utente clicca sul pulsante Home nel menu
     
     // Verifichiamo lo stato di progresso dell'utente
-    _checkUserProgress();
+    checkUserProgress();
     
     // Check for upgrade popup
     _checkForUpgradePopup();
@@ -3006,6 +3010,15 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _aiVideoclipVideoController!.play();
       }
     }
+  }
+
+  // Public wrapper methods for external access
+  void refreshSocialAccounts() {
+    loadSocialAccounts();
+  }
+
+  void refreshUserProgress() {
+    checkUserProgress();
   }
 
 

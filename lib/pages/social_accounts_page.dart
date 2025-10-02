@@ -12,10 +12,10 @@ class SocialAccountsPage extends StatefulWidget {
   const SocialAccountsPage({super.key});
 
   @override
-  State<SocialAccountsPage> createState() => _SocialAccountsPageState();
+  State<SocialAccountsPage> createState() => SocialAccountsPageState();
 }
 
-class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBindingObserver, RouteAware {
+class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBindingObserver, RouteAware {
   int _connectedAccountsCount = 0;
   bool _isLoading = true;
   // Flag per evitare carichi ripetuti
@@ -28,7 +28,7 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Carica i dati appena la pagina viene creata
-    _loadConnectedAccountsCount();
+    loadConnectedAccountsCount();
   }
   
   @override
@@ -57,7 +57,7 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       // Refresh data when app is resumed
-      _loadConnectedAccountsCount();
+      loadConnectedAccountsCount();
     }
   }
 
@@ -73,11 +73,11 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
   void didPopNext() {
     // La pagina è tornata visibile dopo che un'altra pagina è stata rimossa
     if (!_dataLoaded) {
-      _loadConnectedAccountsCount();
+      loadConnectedAccountsCount();
     }
   }
 
-  Future<void> _loadConnectedAccountsCount() async {
+  Future<void> loadConnectedAccountsCount() async {
     // Don't show loading indicator if we're just refreshing
     if (!_isLoading) {
       setState(() {
@@ -612,29 +612,35 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
                   size: 28,
                 ),
               ),
-              const SizedBox(width: 20),
+              const SizedBox(width: 6),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Connected Accounts',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textTheme.bodyMedium?.color,
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        'Connected Accounts',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: theme.textTheme.bodyMedium?.color,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      _isLoading 
-                        ? 'Loading your accounts...'
-                        : _connectedAccountsCount > 0 
-                          ? 'Your accounts are linked to Fluzar'
-                          : 'No accounts linked yet',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: theme.textTheme.bodySmall?.color,
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        _isLoading 
+                          ? 'Loading your accounts...'
+                          : _connectedAccountsCount > 0 
+                            ? 'Your accounts are linked to Fluzar'
+                            : 'No accounts linked yet',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.textTheme.bodySmall?.color,
+                        ),
                       ),
                     ),
                   ],
@@ -743,7 +749,7 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
               onTap: (title.toLowerCase() == 'twitter' || title.toLowerCase() == 'tiktok') ? null : () async {
                 final result = await Navigator.pushNamed(context, '/$title'.toLowerCase());
                 if (result == true) {
-                  _loadConnectedAccountsCount();
+                  loadConnectedAccountsCount();
                 }
               },
               borderRadius: BorderRadius.circular(20),
@@ -822,5 +828,10 @@ class _SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBin
         ),
       ),
     );
+  }
+
+  // Public method for external access to refresh accounts count
+  void refreshAccountsCount() {
+    loadConnectedAccountsCount();
   }
 } 

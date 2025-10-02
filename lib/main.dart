@@ -213,12 +213,13 @@ class MyApp extends StatelessWidget {
     // Imposta la status bar e navigation bar in base al tema
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       // Status bar (zona con batteria, orario, connessione)
-      statusBarColor: Colors.transparent, // Trasparente per vedere il background
+      statusBarColor: isDark ? const Color(0xFF121212) : Colors.white,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
       // Navigation bar (zona menu in basso per Android) e home indicator iOS
-      systemNavigationBarColor: Colors.transparent, // Trasparente per iOS home indicator
+      systemNavigationBarColor: isDark ? const Color(0xFF121212) : Colors.white,
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
     ));
     
     return MaterialApp(
@@ -824,12 +825,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  // Runtime UI log panel for Google Sign-In errors (especially on iOS)
-  final List<String> _googleSignInLogs = [];
-  final List<String> _allGoogleSignInLogs = []; // Lista completa senza limite
-  // Runtime UI log panel for Apple Sign-In errors (especially on iOS)
-  final List<String> _appleSignInLogs = [];
-  final List<String> _allAppleSignInLogs = []; // Lista completa senza limite
 
   @override
   void initState() {
@@ -881,68 +876,8 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
     }
   }
 
-  void _appendGoogleLog(String message) {
-    final timestamp = DateTime.now().toIso8601String();
-    final line = '[$timestamp] $message';
-    AppLogger.debug('GSI: $line');
-    
-    // Aggiungi sempre alla lista completa (senza limite)
-    _allGoogleSignInLogs.add(line);
-    
-    if (mounted) {
-      setState(() {
-        _googleSignInLogs.add(line);
-        // Limita la crescita del log UI per evitare UI pesante
-        if (_googleSignInLogs.length > 200) {
-          _googleSignInLogs.removeRange(0, _googleSignInLogs.length - 200);
-        }
-      });
-    } else {
-      // Fallback if not mounted
-      _googleSignInLogs.add(line);
-      if (_googleSignInLogs.length > 200) {
-        _googleSignInLogs.removeRange(0, _googleSignInLogs.length - 200);
-      }
-    }
-    
-    // Copia automaticamente TUTTI i log completi nel clipboard
-    final allLogs = _allGoogleSignInLogs.join('\n');
-    Clipboard.setData(ClipboardData(text: allLogs));
-  }
 
-  void _appendAppleLog(String message) {
-    final timestamp = DateTime.now().toIso8601String();
-    final line = '[$timestamp] $message';
-    AppLogger.debug('ASI: $line');
-    
-    // Aggiungi sempre alla lista completa (senza limite)
-    _allAppleSignInLogs.add(line);
-    
-    if (mounted) {
-      setState(() {
-        _appleSignInLogs.add(line);
-        // Limita la crescita del log UI per evitare UI pesante
-        if (_appleSignInLogs.length > 200) {
-          _appleSignInLogs.removeRange(0, _appleSignInLogs.length - 200);
-        }
-      });
-    } else {
-      _appleSignInLogs.add(line);
-      if (_appleSignInLogs.length > 200) {
-        _appleSignInLogs.removeRange(0, _appleSignInLogs.length - 200);
-      }
-    }
-    
-    // Copia automaticamente TUTTI i log completi nel clipboard
-    final allLogs = _allAppleSignInLogs.join('\n');
-    Clipboard.setData(ClipboardData(text: allLogs));
-  }
 
-  String _safeTokenPreview(String? token) {
-    if (token == null || token.isEmpty) return 'null';
-    if (token.length <= 10) return '${token.substring(0, token.length)}';
-    return '${token.substring(0, 6)}...${token.substring(token.length - 4)}';
-  }
 
   void _toggleAuthMode() {
     setState(() {
@@ -993,33 +928,28 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       );
 
       print('Starting Google Sign In...');
-      _appendGoogleLog('Starting Google Sign-In | platform=iOS:${Platform.isIOS} | clientId=${Platform.isIOS ? '1095391771291-ner3467g5fqv14j0l5886qe5u7sho8a2.apps.googleusercontent.com' : 'null'} | serverClientId=1095391771291-cqpq4ci6m4ahvqeea21u9c9g4r4ekr02.apps.googleusercontent.com');
       
       // Sign out first to force the account picker to show
       try {
         await googleSignIn.signOut();
-        _appendGoogleLog('Pre-signOut OK (force account picker)');
       } catch (e) {
-        _appendGoogleLog('Pre-signOut FAILED: ${e.toString()}');
+        print('Pre-signOut failed: $e');
       }
       
       // Trigger the authentication flow with prompt for account selection
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       
       print('Google Sign In result: ${googleUser?.email ?? 'null'}');
-      _appendGoogleLog('Account selected: ${googleUser?.email ?? 'null'}');
       
       // If the user cancels the sign-in flow, return
       if (googleUser == null) {
         setState(() => isLoading = false);
-        _appendGoogleLog('User cancelled sign-in (googleUser is null)');
         return;
       }
 
       // Obtain the auth details from the request
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       print('Got Google Auth tokens');
-      _appendGoogleLog('Got tokens: accessToken=${_safeTokenPreview(googleAuth.accessToken)} idToken=${_safeTokenPreview(googleAuth.idToken)}');
 
       // Create a new credential
       final credential = GoogleAuthProvider.credential(
@@ -1028,13 +958,11 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       );
 
       print('Created Firebase credential');
-      _appendGoogleLog('Firebase credential created');
 
       // Sign in to Firebase with the Google credential
       final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
       
       print('Firebase sign in successful: ${userCredential.user?.email}');
-      _appendGoogleLog('Firebase sign-in SUCCESS: ${userCredential.user?.uid} ${userCredential.user?.email}');
       
       // Check if the sign in was successful
       if (userCredential.user != null) {
@@ -1080,8 +1008,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } on FirebaseAuthException catch (e, st) {
       print('Firebase Auth Error: ${e.code} - ${e.message}');
-      _appendGoogleLog('FirebaseAuthException: code=${e.code} message=${e.message ?? ''}');
-      _appendGoogleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       String errorMessage = 'An error occurred during sign in';
       if (e.code == 'network-request-failed') {
         errorMessage = 'Please check your internet connection and try again';
@@ -1090,7 +1016,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       } else if (e.code == 'invalid-credential') {
         errorMessage = 'Invalid credentials';
       }
-      _appendGoogleLog('User-facing message: $errorMessage');
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1135,8 +1060,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
     } on PlatformException catch (e, st) {
       // Errors from google_sign_in plugin (iOS specific codes included)
       print('Google Sign-In PlatformException: ${e.code} - ${e.message} - ${e.details}');
-      _appendGoogleLog('PlatformException: code=${e.code} message=${e.message ?? ''} details=${e.details ?? ''}');
-      _appendGoogleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       final detailed = 'Google Sign-In failed (iOS). Code: ${e.code}. Message: ${e.message ?? ''}.';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1173,8 +1096,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } catch (e, st) {
       print('Unexpected error: $e');
-      _appendGoogleLog('Unexpected error: ${e.toString()}');
-      _appendGoogleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1257,17 +1178,15 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       final hashedNonce = _sha256ofString(rawNonce);
       
       print('Starting Apple Sign In...');
-      _appendAppleLog('Starting Apple Sign-In | platform=iOS:${Platform.isIOS}');
       // Check availability on iOS
       if (Platform.isIOS) {
         try {
           final isAvailable = await SignInWithApple.isAvailable();
-          _appendAppleLog('SignInWithApple.isAvailable=${isAvailable}');
           if (!isAvailable) {
-            _appendAppleLog('Apple Sign-In not available on this iOS version or device.');
+            print('Apple Sign-In not available on this iOS version or device.');
           }
         } catch (e) {
-          _appendAppleLog('Availability check failed: ${e.toString()}');
+          print('Availability check failed: $e');
         }
       }
       
@@ -1281,9 +1200,8 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       );
       
       print('Apple Sign In result: ${appleCredential.userIdentifier}');
-      _appendAppleLog('Apple returned credential: user=${appleCredential.userIdentifier ?? 'null'} email=${appleCredential.email ?? 'null'}');
       if (appleCredential.identityToken == null || appleCredential.identityToken!.isEmpty) {
-        _appendAppleLog('identityToken is NULL/EMPTY - cannot proceed to Firebase. This often happens if Apple did not return token.');
+        print('identityToken is NULL/EMPTY - cannot proceed to Firebase. This often happens if Apple did not return token.');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1327,13 +1245,11 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       );
       
       print('Created Firebase Apple credential');
-      _appendAppleLog('Firebase credential created, idToken=${_safeTokenPreview(appleCredential.identityToken)}');
       
       // Sign in to Firebase with Apple credential
       final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(oauthCredential);
       
       print('Firebase Apple sign in successful: ${userCredential.user?.email}');
-      _appendAppleLog('Firebase Apple sign-in SUCCESS: ${userCredential.user?.uid} ${userCredential.user?.email}');
       
       // Check if the sign in was successful
       if (userCredential.user != null) {
@@ -1379,33 +1295,26 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } on SignInWithAppleAuthorizationException catch (e) {
       print('Apple Sign In Error: ${e.code} - ${e.message}');
-      _appendAppleLog('AuthorizationException: code=${e.code} message=${e.message ?? ''}');
       String errorMessage = 'An error occurred during Apple sign in';
       
       switch (e.code) {
         case AuthorizationErrorCode.canceled:
           errorMessage = 'Apple sign in was canceled';
-          _appendAppleLog('User canceled Apple Sign-In');
           break;
         case AuthorizationErrorCode.failed:
           errorMessage = 'Apple sign in failed';
-          _appendAppleLog('Apple Sign-In failed');
           break;
         case AuthorizationErrorCode.invalidResponse:
           errorMessage = 'Invalid response from Apple';
-          _appendAppleLog('Invalid response from Apple');
           break;
         case AuthorizationErrorCode.notHandled:
           errorMessage = 'Apple sign in not handled';
-          _appendAppleLog('Apple Sign-In not handled');
           break;
         case AuthorizationErrorCode.notInteractive:
           errorMessage = 'Apple sign in not interactive';
-          _appendAppleLog('Apple Sign-In not interactive');
           break;
         case AuthorizationErrorCode.unknown:
           errorMessage = 'Unknown Apple sign in error';
-          _appendAppleLog('Unknown Apple Sign-In error');
           break;
       }
       
@@ -1451,8 +1360,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } on FirebaseAuthException catch (e, st) {
       print('Firebase Auth Error: ${e.code} - ${e.message}');
-      _appendAppleLog('FirebaseAuthException: code=${e.code} message=${e.message ?? ''}');
-      _appendAppleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       String errorMessage = 'An error occurred during Apple sign in';
       if (e.code == 'network-request-failed') {
         errorMessage = 'Please check your internet connection and try again';
@@ -1461,7 +1368,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       } else if (e.code == 'invalid-credential') {
         errorMessage = 'Invalid Apple credentials';
       }
-      _appendAppleLog('User-facing message: $errorMessage');
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1505,8 +1411,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } on PlatformException catch (e, st) {
       print('Apple Sign-In PlatformException: ${e.code} - ${e.message} - ${e.details}');
-      _appendAppleLog('PlatformException: code=${e.code} message=${e.message ?? ''} details=${e.details ?? ''}');
-      _appendAppleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       final detailed = 'Apple Sign-In failed (iOS). Code: ${e.code}. Message: ${e.message ?? ''}.';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1543,8 +1447,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       }
     } catch (e, st) {
       print('Unexpected Apple sign in error: $e');
-      _appendAppleLog('Unexpected error: ${e.toString()}');
-      _appendAppleLog('Stack: ${st.toString().split('\n').take(6).join(' | ')}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2548,95 +2450,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      // Inline log panel for Google Sign-In (visible always)
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (_allGoogleSignInLogs.isNotEmpty) {
-                                            final allLogs = _allGoogleSignInLogs.join('\n');
-                                            Clipboard.setData(ClipboardData(text: allLogs));
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Row(
-                                                  children: [
-                                                    Icon(Icons.copy, color: Colors.white, size: 16),
-                                                    const SizedBox(width: 8),
-                                                    Text('All Google Sign-In logs copied to clipboard'),
-                                                  ],
-                                                ),
-                                                backgroundColor: Colors.green,
-                                                duration: const Duration(seconds: 2),
-                                                behavior: SnackBarBehavior.floating,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(10),
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: Container(
-                                        constraints: BoxConstraints(
-                                          maxHeight: 140,
-                                        ),
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: isDark ? Colors.black.withOpacity(0.2) : Colors.grey[100],
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: (isDark ? Colors.white24 : Colors.black12)),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Icon(Icons.bug_report_outlined, size: 16, color: isDark ? Colors.white70 : Colors.black54),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                    'Google Sign-In Logs (auto-copied)',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isDark ? Colors.white70 : Colors.black87,
-                                                  ),
-                                                ),
-                                                const Spacer(),
-                                                IconButton(
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                                  icon: Icon(Icons.clear_all, size: 16, color: isDark ? Colors.white54 : Colors.black45),
-                                                  onPressed: () {
-                                                    setState(() {
-                                                      _googleSignInLogs.clear();
-                                                        _allGoogleSignInLogs.clear();
-                                                    });
-                                                  },
-                                                  tooltip: 'Clear',
-                                                )
-                                              ],
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Expanded(
-                                              child: Scrollbar(
-                                                child: ListView.builder(
-                                                  itemCount: _googleSignInLogs.length,
-                                                  itemBuilder: (context, index) {
-                                                    final line = _googleSignInLogs[index];
-                                                    return Text(
-                                                      line,
-                                                      style: TextStyle(
-                                                        fontSize: 11,
-                                                        height: 1.25,
-                                                        color: isDark ? Colors.white70 : Colors.black87,
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                          ),
-                                        ),
-                                      ),
                                       const SizedBox(height: 16),
                                       // Apple Sign In button
                                       SizedBox(
@@ -2666,95 +2479,6 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                                               color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                                             ),
                                             backgroundColor: isDark ? Colors.grey[800] : Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      // Inline log panel for Apple Sign-In (visible always)
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (_allAppleSignInLogs.isNotEmpty) {
-                                            final allLogs = _allAppleSignInLogs.join('\n');
-                                            Clipboard.setData(ClipboardData(text: allLogs));
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Row(
-                                                  children: [
-                                                    Icon(Icons.copy, color: Colors.white, size: 16),
-                                                    const SizedBox(width: 8),
-                                                    Text('All Apple Sign-In logs copied to clipboard'),
-                                                  ],
-                                                ),
-                                                backgroundColor: Colors.green,
-                                                duration: const Duration(seconds: 2),
-                                                behavior: SnackBarBehavior.floating,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(10),
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: Container(
-                                        constraints: BoxConstraints(
-                                          maxHeight: 140,
-                                        ),
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: isDark ? Colors.black.withOpacity(0.2) : Colors.grey[100],
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: (isDark ? Colors.white24 : Colors.black12)),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Icon(Icons.bug_report_outlined, size: 16, color: isDark ? Colors.white70 : Colors.black54),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                    'Apple Sign-In Logs (auto-copied)',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isDark ? Colors.white70 : Colors.black87,
-                                                  ),
-                                                ),
-                                                const Spacer(),
-                                                IconButton(
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                                  icon: Icon(Icons.clear_all, size: 16, color: isDark ? Colors.white54 : Colors.black45),
-                                                  onPressed: () {
-                                                    setState(() {
-                                                      _appleSignInLogs.clear();
-                                                        _allAppleSignInLogs.clear();
-                                                    });
-                                                  },
-                                                  tooltip: 'Clear',
-                                                )
-                                              ],
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Expanded(
-                                              child: Scrollbar(
-                                                child: ListView.builder(
-                                                  itemCount: _appleSignInLogs.length,
-                                                  itemBuilder: (context, index) {
-                                                    final line = _appleSignInLogs[index];
-                                                    return Text(
-                                                      line,
-                                                      style: TextStyle(
-                                                        fontSize: 11,
-                                                        height: 1.25,
-                                                        color: isDark ? Colors.white70 : Colors.black87,
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                              ),
-                                            ),
-                                          ],
                                           ),
                                         ),
                                       ),
@@ -3240,6 +2964,7 @@ class _MainScreenState extends State<MainScreen> {
   final GlobalKey<HomePageState> _homePageKey = GlobalKey<HomePageState>();
   final GlobalKey<PremiumHomePageState> _premiumHomePageKey = GlobalKey<PremiumHomePageState>();
   final GlobalKey<ScheduledPostsPageState> _scheduledPostsPageKey = GlobalKey<ScheduledPostsPageState>();
+  final GlobalKey<SocialAccountsPageState> _socialAccountsPageKey = GlobalKey<SocialAccountsPageState>();
   late List<Widget> _pages;
   int _unreadNotifications = 0;
   int _unreadComments = 0;
@@ -3420,6 +3145,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _onItemTapped(int index) {
     bool isNavigatingToHome = index == 0 && _selectedIndex != 0;
+    bool isNavigatingToSocialAccounts = index == 1 && _selectedIndex != 1;
     bool isNavigatingToScheduledPosts = index == 4 && _selectedIndex != 4;
     bool isNavigatingAwayFromScheduledPosts = _selectedIndex == 4 && index != 4;
     
@@ -3434,10 +3160,20 @@ class _MainScreenState extends State<MainScreen> {
     
     if (isNavigatingToHome) {
       if (_isPremium == true && _premiumHomePageKey.currentState != null) {
-        // Qui puoi aggiungere eventuale refresh per premium
+        // Refresh accounts and check progress for premium users
+        _premiumHomePageKey.currentState!.refreshSocialAccounts();
+        _premiumHomePageKey.currentState!.refreshUserProgress();
       } else if (_isPremium == false && _homePageKey.currentState != null) {
         _homePageKey.currentState!.refreshCredits();
+        // Also refresh accounts for regular users
+        _homePageKey.currentState!.refreshSocialAccounts();
+        _homePageKey.currentState!.refreshUserProgress();
       }
+    }
+    
+    // Refresh social accounts count when navigating to social accounts page
+    if (isNavigatingToSocialAccounts && _socialAccountsPageKey.currentState != null) {
+      _socialAccountsPageKey.currentState!.refreshAccountsCount();
     }
     
     // Attiva lo scorrimento automatico quando si naviga alla pagina scheduled posts
@@ -3483,12 +3219,13 @@ class _MainScreenState extends State<MainScreen> {
     // Aggiorna la status bar e navigation bar in base al tema corrente
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       // Status bar (zona con batteria, orario, connessione)
-      statusBarColor: Colors.transparent, // Trasparente per vedere il background
+      statusBarColor: isDark ? const Color(0xFF121212) : Colors.white,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
       // Navigation bar (zona menu in basso per Android) e home indicator iOS
-      systemNavigationBarColor: Colors.transparent, // Trasparente per iOS home indicator
+      systemNavigationBarColor: isDark ? const Color(0xFF121212) : Colors.white,
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
     ));
     
     if (_isPremium == null) {
@@ -3507,7 +3244,7 @@ class _MainScreenState extends State<MainScreen> {
       _isPremium == true
           ? PremiumHomePage(key: _premiumHomePageKey)
           : HomePage(key: _homePageKey, initialArguments: widget.initialArguments),
-      const SocialAccountsPage(),
+      SocialAccountsPage(key: _socialAccountsPageKey),
       const UploadVideoPage(),
       const HistoryPage(),
       ScheduledPostsPage(key: _scheduledPostsPageKey),
@@ -3784,7 +3521,7 @@ class _MainScreenState extends State<MainScreen> {
     return Container(
       margin: EdgeInsets.symmetric(
         horizontal: 20, 
-        vertical: Platform.isIOS ? 28 : 16, // 16 + 12 = 28 per iOS
+        vertical: Platform.isIOS ? 23 : 16, // 28 - 5 = 23 per iOS (2mm più in alto)
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(

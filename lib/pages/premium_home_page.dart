@@ -17,6 +17,8 @@ import 'community_page.dart';
 import 'package:lottie/lottie.dart';
 import '../widgets/notification_permission_dialog.dart';
 import '../services/notification_permission_service.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'dart:math';
 
 class PremiumHomePage extends StatefulWidget {
   const PremiumHomePage({Key? key}) : super(key: key);
@@ -34,6 +36,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
   List<Map<String, dynamic>> _socialAccounts = [];
   List<Map<String, dynamic>> _upcomingScheduledPosts = [];
   bool _isLoading = true;
+  List<Map<String, dynamic>> _topTrends = [];
 
   // Global keys for tutorial targets
   final GlobalKey _connectAccountsKey = GlobalKey(debugLabel: 'connectAccounts');
@@ -52,15 +55,17 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
   void initState() {
     super.initState();
     _loadVideos();
-    _loadSocialAccounts();
+    loadSocialAccounts();
     _loadUpcomingScheduledPosts();
-    _checkUserProgress();
+    _loadTopTrends();
+    checkUserProgress();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupTutorialKeys();
     });
     Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) {
         _loadUpcomingScheduledPosts();
+        _loadTopTrends();
       } else {
         timer.cancel();
       }
@@ -69,13 +74,17 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
 
   void _setupTutorialKeys() {
     if (!mounted) return;
-    final tutorialProvider = Provider.of<TutorialProvider>(context, listen: false);
-    tutorialProvider.setTargetKey(1, _connectAccountsKey);
-    tutorialProvider.setTargetKey(2, _uploadVideoKey);
-    tutorialProvider.setTargetKey(3, _statsKey);
+    try {
+      final tutorialProvider = Provider.of<TutorialProvider>(context, listen: false);
+      tutorialProvider.setTargetKey(1, _connectAccountsKey);
+      tutorialProvider.setTargetKey(2, _uploadVideoKey);
+      tutorialProvider.setTargetKey(3, _statsKey);
+    } catch (e) {
+      print('TutorialProvider not available: $e');
+    }
   }
 
-  Future<void> _checkUserProgress() async {
+  Future<void> checkUserProgress() async {
     if (_currentUser == null || !mounted) return;
     try {
       bool hasConnectedAccounts = false;
@@ -257,7 +266,158 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
     }
   }
 
-  Future<void> _loadSocialAccounts() async {
+  Future<void> _loadTopTrends() async {
+    if (!mounted) return;
+    try {
+      final DatabaseReference database = FirebaseDatabase.instance.ref();
+      final List<String> platformNodes = [
+        'TIKTOKTREND',
+        'INSTAGRAMTREND',
+        'FACEBOOKTREND',
+        'TWITTERTREND',
+        'THREADSTREND',
+        'YOUTUBETREND',
+      ];
+      
+      List<Map<String, dynamic>> allTrends = [];
+      
+      for (final node in platformNodes) {
+        final DataSnapshot snapshot = await database.child(node).get();
+        if (snapshot.exists && snapshot.value != null) {
+          final dynamic data = snapshot.value;
+          if (data is List) {
+            allTrends.addAll((data as List).map((item) {
+              if (item == null) return null;
+              if (item is Map) {
+                final trendData = item.map((key, value) => MapEntry(key.toString(), value));
+                return {
+                  'trend_name': trendData['trend_name'] ?? '',
+                  'description': trendData['description'] ?? '',
+                  'platform': node.replaceAll('TREND', '').toLowerCase(),
+                  'category': trendData['category'] ?? '',
+                  'trend_level': trendData['trend_level'] ?? '⏸',
+                  'hashtags': trendData['hashtags'] ?? [],
+                  'growth_rate': trendData['growth_rate'] ?? '',
+                  'virality_score': _parseNumericValue(trendData['virality_score']),
+                  'data_points': _parseDataPoints(trendData['data_points']),
+                };
+              }
+              return null;
+            }).whereType<Map<String, dynamic>>());
+          } else if (data is Map) {
+            final Map<dynamic, dynamic> dataMap = data as Map<dynamic, dynamic>;
+            allTrends.addAll(dataMap.entries.map((entry) {
+              final trendData = entry.value;
+              if (trendData == null) return null;
+              if (trendData is Map) {
+                return {
+                  'trend_name': trendData['trend_name'] ?? '',
+                  'description': trendData['description'] ?? '',
+                  'platform': node.replaceAll('TREND', '').toLowerCase(),
+                  'category': trendData['category'] ?? '',
+                  'trend_level': trendData['trend_level'] ?? '⏸',
+                  'hashtags': trendData['hashtags'] ?? [],
+                  'growth_rate': trendData['growth_rate'] ?? '',
+                  'virality_score': _parseNumericValue(trendData['virality_score']),
+                  'data_points': _parseDataPoints(trendData['data_points']),
+                };
+              }
+              return null;
+            }).whereType<Map<String, dynamic>>());
+          }
+        }
+      }
+      
+      // Ordina i trend per virality_score e growth_rate, poi per trend_level
+      allTrends.sort((a, b) {
+        // Prima per trend_level (🔺 prima di ⏸)
+        if (a['trend_level'] == '🔺' && b['trend_level'] != '🔺') return -1;
+        if (a['trend_level'] != '🔺' && b['trend_level'] == '🔺') return 1;
+        
+        // Poi per virality_score
+        final aScore = a['virality_score'] as num? ?? 0.0;
+        final bScore = b['virality_score'] as num? ?? 0.0;
+        return bScore.compareTo(aScore);
+      });
+      
+      // Prendi solo i top 3 trend
+      final topTrends = allTrends.take(3).toList();
+      
+      
+      if (mounted) {
+        setState(() {
+          _topTrends = topTrends;
+        });
+      }
+    } catch (e) {
+      print('Error loading top trends: $e');
+      if (mounted) {
+        setState(() {
+          _topTrends = [];
+        });
+      }
+    }
+  }
+
+  double _parseNumericValue(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(value) ?? 0.0;
+    }
+    return 0.0;
+  }
+
+  List<Map<String, dynamic>> _parseDataPoints(dynamic dataPoints) {
+    if (dataPoints == null) return [];
+    
+    if (dataPoints is List) {
+      return dataPoints.map((point) {
+        if (point == null) return <String, dynamic>{};
+        if (point is Map) {
+          return point.map((k, v) => MapEntry(k.toString(), v));
+        }
+        return <String, dynamic>{};
+      }).where((point) => point.isNotEmpty).toList();
+    }
+    
+    return [];
+  }
+
+  String _cleanGrowthRate(String growthRate) {
+    // Rimuovi "last week" e altri testi indesiderati in modo più aggressivo
+    String cleaned = growthRate
+        .replaceAll('last week', '')
+        .replaceAll('Last week', '')
+        .replaceAll('LAST WEEK', '')
+        .replaceAll('(last week)', '')
+        .replaceAll('(Last week)', '')
+        .replaceAll('(LAST WEEK)', '')
+        .replaceAll('()', '') // Rimuovi parentesi vuote
+        .replaceAll('( )', '') // Rimuovi parentesi con spazio
+        .replaceAll('  ', ' ') // Rimuovi spazi doppi
+        .replaceAll('( ', '(') // Rimuovi spazi dopo parentesi aperta
+        .replaceAll(' )', ')') // Rimuovi spazi prima di parentesi chiusa
+        .replaceAll('()', '') // Rimuovi di nuovo parentesi vuote
+        .trim();
+    
+    return cleaned.isNotEmpty ? cleaned : '0%';
+  }
+
+  String _getViralPosition(int index) {
+    switch (index) {
+      case 0:
+        return '1°';
+      case 1:
+        return '2°';
+      case 2:
+        return '3°';
+      default:
+        return '${index + 1}°';
+    }
+  }
+
+  Future<void> loadSocialAccounts() async {
     if (_currentUser == null || !mounted) return;
 
     try {
@@ -765,8 +925,8 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
         'isCompleted': _hasConnectedAccounts,
         'onTap': () {
           Navigator.pushNamed(context, '/accounts').then((_) {
-            _loadSocialAccounts();
-            _checkUserProgress();
+            loadSocialAccounts();
+            checkUserProgress();
           });
         },
         'key': _connectAccountsKey,
@@ -780,7 +940,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
         'onTap': () {
           Navigator.pushNamed(context, '/upload').then((_) {
             _loadVideos();
-            _checkUserProgress();
+            checkUserProgress();
           });
         },
         'key': _uploadVideoKey,
@@ -1207,7 +1367,11 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                 theme,
                 isAddButton: true,
                 onTap: () {
-                  Navigator.pushNamed(context, '/accounts');
+                  Navigator.pushNamed(context, '/accounts').then((_) {
+                    // Refresh accounts and check progress when returning
+                    loadSocialAccounts();
+                    checkUserProgress();
+                  });
                 },
               );
             }
@@ -2088,12 +2252,10 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                     ],
             ),
           ),
-          child: Stack(
-            children: [
-              Column(
+          child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header con icona e titolo
+              // Header con icona e titolo (PARTE ALTA - COME PRIMA)
                   Row(
                     children: [
                       // Icona AI senza container circolare
@@ -2136,7 +2298,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                   
                   const SizedBox(height: 20),
                   
-                  // Descrizione migliorata
+              // Descrizione (PARTE ALTA - COME PRIMA)
                   Text(
                     'Discover trending content across TikTok, Instagram, YouTube & more with real-time AI analysis',
                     style: TextStyle(
@@ -2151,7 +2313,95 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                   
                   const SizedBox(height: 20),
                   
-                  // Footer con feature e freccia
+              // NUOVA SEZIONE: Top Trends scorrevoli orizzontalmente
+              if (_topTrends.isNotEmpty) ...[
+                Row(
+                  children: [
+                    Text(
+                      'Top Trending Now',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: isDark 
+                            ? Colors.white.withOpacity(0.9)
+                            : Color(0xFF1A1A1A).withOpacity(0.9),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_topTrends.length} trends',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark 
+                            ? Colors.white.withOpacity(0.6)
+                            : Color(0xFF1A1A1A).withOpacity(0.6),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Scroll orizzontale dei trend (come trends_page.dart)
+                SizedBox(
+                  height: 320, // Aumentata ulteriormente per il grafico
+                  child: PageView.builder(
+                    controller: PageController(viewportFraction: 0.9),
+                    itemCount: _topTrends.length,
+                    itemBuilder: (context, index) {
+                      final trend = _topTrends[index];
+                      return Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        child: _buildTrendCard(theme, trend, isDark, index),
+                      );
+                    },
+                  ),
+                ),
+                
+                const SizedBox(height: 16),
+              ] else ...[
+                // Debug: mostra se stiamo caricando o se non ci sono trend
+                Row(
+                  children: [
+                    Text(
+                      'Loading trends...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark 
+                            ? Colors.white.withOpacity(0.6)
+                            : Color(0xFF1A1A1A).withOpacity(0.6),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        print('Force reloading trends...');
+                        _loadTopTrends();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isDark 
+                              ? Colors.white.withOpacity(0.2)
+                              : Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Reload',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isDark 
+                                ? Colors.white.withOpacity(0.8)
+                                : Colors.black.withOpacity(0.8),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+              ],
+              
+              // Footer con feature e freccia (PARTE BASSA - COME PRIMA)
                   Row(
                     children: [
                       // Feature badge con gradiente
@@ -2208,20 +2458,482 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                           color: isDark 
                               ? Colors.white.withOpacity(0.7)
                               : Color(0xFF1A1A1A).withOpacity(0.6),
-                          size: 16,
+                      size: 20,
                         ),
                       ),
                     ],
                   ),
                 ],
               ),
-              
-
-            ],
-          ),
         ),
       ),
     );
+  }
+
+  Widget _buildTrendCard(ThemeData theme, Map<String, dynamic> trend, bool isDark, int index) {
+    final platform = trend['platform'] as String;
+    final trendName = trend['trend_name'] as String;
+    final description = trend['description'] as String;
+    final viralityScore = trend['virality_score'] as num? ?? 0.0;
+    final growthRate = trend['growth_rate'] as String? ?? '';
+    final trendLevel = trend['trend_level'] as String? ?? '⏸';
+    final category = trend['category'] as String? ?? '';
+    final hashtags = trend['hashtags'] as List<dynamic>? ?? [];
+    final dataPoints = trend['data_points'] as List<dynamic>? ?? [];
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark 
+            ? Color(0xFF1E1E1E)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark 
+              ? Colors.white.withOpacity(0.1)
+              : Colors.grey.withOpacity(0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark 
+                ? Colors.black.withOpacity(0.3)
+                : Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header con platform logo e trend level
+            Row(
+              children: [
+                // Platform logo
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: _getPlatformLogo(platform),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        platform.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _getPlatformColorForTrend(platform),
+                        ),
+                      ),
+                      if (category.isNotEmpty)
+                        Text(
+                          category,
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: isDark 
+                                ? Colors.white.withOpacity(0.6)
+                                : Colors.black.withOpacity(0.6),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Trend name
+            Text(
+              trendName,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: isDark 
+                    ? Colors.white
+                    : Colors.black,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            
+            const SizedBox(height: 6),
+            
+            // Description
+            if (description.isNotEmpty)
+              Text(
+                description,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.7)
+                      : Colors.black.withOpacity(0.7),
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            
+            const SizedBox(height: 12),
+            
+            // Engagement rate chart (minimal, senza scritte)
+                   if (dataPoints.isNotEmpty)
+                     Container(
+                       height: 100,
+                       decoration: BoxDecoration(
+                         color: isDark
+                             ? Colors.white.withOpacity(0.05)
+                             : Colors.black.withOpacity(0.05),
+                         borderRadius: BorderRadius.circular(8),
+                       ),
+                       child: Padding(
+                         padding: const EdgeInsets.all(8),
+                         child: _buildEngagementChart(dataPoints, isDark),
+                       ),
+                     ),
+            
+            const SizedBox(height: 12),
+            
+            // Stats row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildCompactStatItem(
+                    'Score',
+                    '${viralityScore.toStringAsFixed(0)}',
+                    Icons.trending_up,
+                    isDark,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                       Expanded(
+                         child: _buildCompactStatItem(
+                           'Growth',
+                           growthRate.isNotEmpty ? _cleanGrowthRate(growthRate) : '0%',
+                           Icons.speed,
+                           isDark,
+                         ),
+                       ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildCompactStatItem(
+                    'Viral',
+                    _getViralPosition(index),
+                    Icons.whatshot,
+                    isDark,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactStatItem(String label, String value, IconData icon, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+      decoration: BoxDecoration(
+        color: isDark 
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 12,
+            color: isDark 
+                ? Colors.white.withOpacity(0.7)
+                : Colors.black.withOpacity(0.7),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: isDark 
+                  ? Colors.white.withOpacity(0.9)
+                  : Colors.black.withOpacity(0.9),
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 7,
+              color: isDark 
+                  ? Colors.white.withOpacity(0.6)
+                  : Colors.black.withOpacity(0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEngagementChart(List<dynamic> dataPoints, bool isDark) {
+    if (dataPoints.isEmpty) return const SizedBox.shrink();
+    
+    // Estrai i valori di engagement rate dai dataPoints
+    List<double> engagementValues = [];
+    for (var point in dataPoints) {
+      if (point is Map && point['engagement_rate'] != null) {
+        engagementValues.add((point['engagement_rate'] as num).toDouble());
+      }
+    }
+    
+    if (engagementValues.isEmpty) return const SizedBox.shrink();
+    
+    // Calcolo il massimo e minimo per lo scaling
+    final maxValue = engagementValues.reduce(max);
+    final minValue = engagementValues.reduce(min);
+    final range = maxValue - minValue;
+    
+    return LineChart(
+      LineChartData(
+        gridData: FlGridData(show: false),
+        titlesData: FlTitlesData(show: false),
+        borderData: FlBorderData(show: false),
+        lineTouchData: LineTouchData(
+          enabled: false,
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: engagementValues.asMap().entries.map((e) {
+              final x = e.key.toDouble();
+              final y = range > 0 ? ((e.value - minValue) / range * 80).toDouble() : 40.0;
+              return FlSpot(x, y);
+            }).toList(),
+            isCurved: true,
+            color: const Color(0xFF667eea),
+            barWidth: 3,
+            isStrokeCapRound: true,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                return FlDotCirclePainter(
+                  radius: 3,
+                  color: const Color(0xFF667eea),
+                  strokeWidth: 2,
+                  strokeColor: Colors.white,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              color: const Color(0xFF667eea).withOpacity(0.1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _getPlatformLogo(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'tiktok':
+        return Image.asset(
+          'assets/loghi/logo_tiktok.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.music_note,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'youtube':
+        return Image.asset(
+          'assets/loghi/logo_yt.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.play_arrow,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'instagram':
+        return Image.asset(
+          'assets/loghi/logo_insta.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.camera_alt,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'facebook':
+        return Image.asset(
+          'assets/loghi/logo_facebook.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.facebook,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'twitter':
+        return Image.asset(
+          'assets/loghi/logo_twitter.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.chat,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'threads':
+        return Image.asset(
+          'assets/loghi/threads_logo.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.chat_outlined,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      default:
+        return Icon(
+          Icons.share,
+          size: 16,
+          color: _getPlatformColorForTrend(platform),
+        );
+    }
+  }
+
+  Widget _buildMiniChart(List<dynamic> dataPoints, bool isDark) {
+    if (dataPoints.isEmpty) return const SizedBox.shrink();
+    
+    // Estrai i valori per il mini chart
+    List<double> values = [];
+    for (var point in dataPoints.take(7)) {
+      if (point is Map && point['dailyViews'] != null) {
+        values.add((point['dailyViews'] as num).toDouble());
+      }
+    }
+    
+    if (values.isEmpty) return const SizedBox.shrink();
+    
+    final maxValue = values.reduce(max);
+    final minValue = values.reduce(min);
+    final range = maxValue - minValue;
+    
+    return Container(
+      height: 40,
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(show: false),
+          titlesData: FlTitlesData(show: false),
+          borderData: FlBorderData(show: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: values.asMap().entries.map((e) {
+                final x = e.key.toDouble();
+                final y = range > 0 ? ((e.value - minValue) / range * 40).toDouble() : 20.0;
+                return FlSpot(x, y);
+              }).toList(),
+              isCurved: true,
+              color: isDark ? Colors.white.withOpacity(0.8) : Colors.black.withOpacity(0.8),
+              barWidth: 2,
+              isStrokeCapRound: true,
+              dotData: FlDotData(show: false),
+              belowBarData: BarAreaData(
+                show: true,
+                color: (isDark ? Colors.white : Colors.black).withOpacity(0.1),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getPlatformColorForTrend(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'tiktok':
+        return Colors.black;
+      case 'youtube':
+        return Colors.red;
+      case 'instagram':
+        return Color(0xFFE1306C);
+      case 'facebook':
+        return Color(0xFF1877F2);
+      case 'twitter':
+        return Color(0xFF1DA1F2);
+      case 'threads':
+        return Color(0xFF000000);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _getPlatformIconForTrend(String platform, double size) {
+    switch (platform.toLowerCase()) {
+      case 'youtube':
+        return Icon(
+          Icons.play_arrow,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      case 'tiktok':
+        return Icon(
+          Icons.music_note,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      case 'instagram':
+        return Icon(
+          Icons.camera_alt,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      case 'facebook':
+        return Icon(
+          Icons.facebook,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      case 'twitter':
+        return Icon(
+          Icons.chat,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      case 'threads':
+        return Icon(
+          Icons.chat_outlined,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+      default:
+        return Icon(
+          Icons.share,
+          size: size,
+          color: _getPlatformColorForTrend(platform),
+        );
+    }
   }
 
   // Card per navigare alla pagina community
@@ -2487,7 +3199,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                 child: Icon(
                   Icons.arrow_forward_ios,
                   color: Colors.white,
-                  size: 16,
+                  size: 20,
                 ),
               ),
             ],
@@ -2495,6 +3207,15 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
         ),
       ),
     );
+  }
+
+  // Public wrapper methods for external access
+  void refreshSocialAccounts() {
+    loadSocialAccounts();
+  }
+
+  void refreshUserProgress() {
+    checkUserProgress();
   }
 }
 

@@ -124,7 +124,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
 
       if (playbackUrl == null) {
         setState(() {
-          _errorMessage = 'Sorgente video non disponibile';
+          _errorMessage = 'Video source not available';
           _isLoading = false;
         });
         return;
@@ -280,9 +280,13 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
           .child('comments')
           .get();
       int commentCount = 0;
-      if (commentsSnapshot.exists && commentsSnapshot.value is Map) {
-        final comments = commentsSnapshot.value as Map<dynamic, dynamic>;
-        commentCount = comments.length;
+      if (commentsSnapshot.exists) {
+        final dynamic raw = commentsSnapshot.value;
+        if (raw is Map) {
+          commentCount = raw.length;
+        } else if (raw is List) {
+          commentCount = raw.where((e) => e != null).length;
+        }
       }
       _commentsCountCache[cacheKey] = commentCount;
       return commentCount;
@@ -614,7 +618,19 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                   );
                 }
                 
-                final commentsData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>?;
+                // iOS: i commenti possono arrivare come Map o List
+                final dynamic rawComments = snapshot.data!.snapshot.value;
+                Map<dynamic, dynamic>? commentsData;
+                if (rawComments is Map) {
+                  commentsData = rawComments;
+                } else if (rawComments is List) {
+                  commentsData = {
+                    for (int i = 0; i < rawComments.length; i++)
+                      if (rawComments[i] != null) i.toString(): rawComments[i]
+                  };
+                } else {
+                  commentsData = null;
+                }
                 if (commentsData == null || commentsData.isEmpty) {
                   return Container(
                     padding: EdgeInsets.symmetric(horizontal: 20),
@@ -813,6 +829,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                       await _submitComment(widget.videoId, widget.videoOwnerId, commentController.text.trim(), _videoData ?? {'id': widget.videoId, 'title': _videoData?['title']});
                       commentController.clear();
                       commentFocusNode.unfocus();
+                      FocusScope.of(context).unfocus();
                     }
                   },
                   child: Container(
@@ -1776,12 +1793,30 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                       ),
                     );
                   }
-                  final data = snap.value as Map<dynamic, dynamic>;
-                  final replies = data.entries.map((e) {
-                    final m = Map<String, dynamic>.from(e.value as Map);
-                    m['id'] = e.key.toString();
-                    return m;
-                  }).toList()
+                  // iOS: le replies possono essere Map o List
+                  final dynamic rawReplies = snap.value;
+                  List<Map<String, dynamic>> replies;
+                  if (rawReplies is Map) {
+                    replies = rawReplies.entries.map((e) {
+                      final m = Map<String, dynamic>.from(e.value as Map);
+                      m['id'] = e.key.toString();
+                      return m;
+                    }).toList();
+                  } else if (rawReplies is List) {
+                    replies = [];
+                    for (int i = 0; i < rawReplies.length; i++) {
+                      final item = rawReplies[i];
+                      if (item is Map) {
+                        final m = Map<String, dynamic>.from(item);
+                        m['id'] = i.toString();
+                        replies.add(m);
+                      }
+                    }
+                  } else {
+                    replies = [];
+                  }
+                  replies = replies
+                    
                     ..sort((a, b) => ((b['timestamp'] ?? 0) as int).compareTo((a['timestamp'] ?? 0) as int));
 
                   return ListView.builder(
@@ -1924,6 +1959,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                             await _submitReply(parentComment, text.trim());
                             replyController.clear();
                             replyFocusNode.unfocus();
+                            FocusScope.of(context).unfocus();
                           }
                         },
                       ),
@@ -1936,6 +1972,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                         await _submitReply(parentComment, replyController.text.trim());
                         replyController.clear();
                         replyFocusNode.unfocus();
+                        FocusScope.of(context).unfocus();
                       }
                     },
                     child: Container(
@@ -2490,8 +2527,15 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
 
       final starUsersRaw = video != null ? video['star_users'] : null;
       Map<String, dynamic> starUsers = {};
-      if (starUsersRaw != null && starUsersRaw is Map) {
-        starUsers = Map<String, dynamic>.from(starUsersRaw);
+      if (starUsersRaw != null) {
+        if (starUsersRaw is Map) {
+          starUsers = Map<String, dynamic>.from(starUsersRaw);
+        } else if (starUsersRaw is List) {
+          // Converte lista userId -> mappa {userId: true}
+          for (final item in starUsersRaw) {
+            if (item != null) starUsers[item.toString()] = true;
+          }
+        }
       }
 
       if (starUsers.isEmpty) {

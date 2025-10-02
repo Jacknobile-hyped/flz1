@@ -384,6 +384,20 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '7. This is a platform limitation, not a Fluzar bug or error',
           'icon': Icons.person_off,
         },
+        {
+          'title': 'Profile Likes & Comments Not Updating',
+          'solution': 'If your profile statistics (likes and comments) are not updating or showing incorrect numbers:\n\n'
+              '1. Profile statistics only include data from videos published through Fluzar\n'
+              '2. Videos uploaded directly to social platforms (without using Fluzar) are not counted\n'
+              '3. To update statistics for published videos, you must manually refresh the data\n'
+              '4. Go to your published video details page and tap "View Analytics"\n'
+              '5. This will fetch the latest likes and comments data from the social platform\n'
+              '6. The profile totals will automatically update after refreshing each video\'s analytics\n'
+              '7. Statistics may take 24-48 hours to appear on social platforms after publishing\n'
+              '8. Some platforms have API limitations that may delay data updates\n'
+              '9. Free accounts have limited analytics refresh rate (manual refresh required)',
+          'icon': Icons.analytics_outlined,
+        },
       ],
     },
     {

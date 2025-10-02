@@ -897,13 +897,13 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
         profileData['profileImageSource'] = 'cloudflare_r2';
       }
       
-      // Salva i dati del profilo
+      // Salva i dati del profilo (usa update per preservare dati esistenti come alreadyfriends)
       await _database
           .child('users')
           .child('users')
           .child(_currentUser!.uid)
           .child('profile')
-          .set(profileData);
+          .update(profileData);
           
       print('Dati profilo salvati in Firebase');
       

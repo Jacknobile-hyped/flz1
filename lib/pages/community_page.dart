@@ -790,10 +790,15 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
     if (_currentUser == null) return false;
     
     final starUsers = video['star_users'];
-    if (starUsers == null || starUsers is! Map) return false;
+    if (starUsers == null) return false;
     
-    // Controlla se l'utente corrente ha messo stella
-    return starUsers.containsKey(_currentUser!.uid);
+    // iOS robust: può essere Map o List
+    if (starUsers is Map) {
+      return starUsers.containsKey(_currentUser!.uid);
+    } else if (starUsers is List) {
+      return starUsers.contains(_currentUser!.uid);
+    }
+    return false;
   }
   
   bool _isCommentStarredByCurrentUser(Map<String, dynamic> comment) {
@@ -1680,7 +1685,19 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                   );
                 }
                 
-                final commentsData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>?;
+                // iOS: i commenti possono arrivare come Map o List
+                final dynamic rawComments = snapshot.data!.snapshot.value;
+                Map<dynamic, dynamic>? commentsData;
+                if (rawComments is Map) {
+                  commentsData = rawComments;
+                } else if (rawComments is List) {
+                  commentsData = {
+                    for (int i = 0; i < rawComments.length; i++)
+                      if (rawComments[i] != null) i.toString(): rawComments[i]
+                  };
+                } else {
+                  commentsData = null;
+                }
                 if (commentsData == null || commentsData.isEmpty) {
                   return Container(
                     padding: EdgeInsets.symmetric(horizontal: 20),
@@ -1848,6 +1865,7 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                       );
                       commentController.clear();
                       commentFocusNode.unfocus();
+                      FocusScope.of(context).unfocus();
                     }
                   },
                   child: Container(
@@ -2631,6 +2649,7 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                           await _submitReply(parentComment, videoUserId, replyController.text.trim());
                           replyController.clear();
                           replyFocusNode.unfocus();
+                          FocusScope.of(context).unfocus();
                           Navigator.pop(context);
                         }
                       },
@@ -3196,6 +3215,7 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                              await _submitReply(parentComment, videoUserId, text.trim());
                              replyController.clear();
                              replyFocusNode.unfocus();
+                             FocusScope.of(context).unfocus();
                            }
                          },
                        ),
@@ -3211,6 +3231,7 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                          await _submitReply(parentComment, videoUserId, replyController.text.trim());
                          replyController.clear();
                          replyFocusNode.unfocus();
+                         FocusScope.of(context).unfocus();
                        }
                      },
                     child: Container(
@@ -6310,7 +6331,7 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
             ],
           )
         : ListView.builder(
-            padding: EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
             itemCount: _searchResults.length + 1, // +1 per la card di invito
             itemBuilder: (context, index) {
               if (index == 0) {
@@ -7330,9 +7351,13 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
           .get();
       
       int commentCount = 0;
-      if (commentsSnapshot.exists && commentsSnapshot.value is Map) {
-        final comments = commentsSnapshot.value as Map<dynamic, dynamic>;
-        commentCount = comments.length;
+      if (commentsSnapshot.exists) {
+        final dynamic raw = commentsSnapshot.value;
+        if (raw is Map) {
+          commentCount = raw.length;
+        } else if (raw is List) {
+          commentCount = raw.where((e) => e != null).length;
+        }
       }
       
       // Salva in cache
@@ -7363,9 +7388,13 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
           .get();
       
       int commentCount = 0;
-      if (commentsSnapshot.exists && commentsSnapshot.value is Map) {
-        final comments = commentsSnapshot.value as Map<dynamic, dynamic>;
-        commentCount = comments.length;
+      if (commentsSnapshot.exists) {
+        final dynamic raw = commentsSnapshot.value;
+        if (raw is Map) {
+          commentCount = raw.length;
+        } else if (raw is List) {
+          commentCount = raw.where((e) => e != null).length;
+        }
       }
       
       // Salva in cache

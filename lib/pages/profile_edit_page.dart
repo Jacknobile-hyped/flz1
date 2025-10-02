@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'dart:async';
@@ -14,6 +15,7 @@ import 'package:convert/convert.dart';
 import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:lottie/lottie.dart';
 import 'settings_page.dart';
 import '../services/email_service.dart';
 
@@ -98,6 +100,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   Map<String, Animation<double>> _commentStarScaleAnimations = {};
   Map<String, Animation<double>> _commentStarRotationAnimations = {};
   
+  // Animazione per i pulsanti impostazioni
+  late AnimationController _settingsAnimationController;
+  late Animation<double> _settingsRotationAnimation;
+  late Animation<double> _settingsButtonsOpacityAnimation;
+  late Animation<double> _settingsButtonsScaleAnimation;
+  bool _showSettingsButtons = false;
+  
   // Listener per l'immagine profilo (come nel main.dart)
   StreamSubscription? _profileImageSubscription;
   StreamSubscription? _currentUserProfileImageSubscription;
@@ -156,7 +165,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   
   // Search bar per filtrare amici
   final TextEditingController _friendsSearchController = TextEditingController();
+  final FocusNode _friendsSearchFocusNode = FocusNode();
   String _friendsSearchQuery = '';
+  bool _isSearchExpanded = false;
+  
+  // Animation controller per la search bar
+  late AnimationController _searchAnimationController;
+  late Animation<double> _searchWidthAnimation;
+  late Animation<double> _searchOpacityAnimation;
 
   // Cache per i conteggi dei commenti
   Map<String, int> _commentsCountCache = {};
@@ -312,6 +328,16 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       vsync: this,
     );
     
+    _settingsAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    
+    _searchAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -333,6 +359,46 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       end: _viralystScore.toDouble(),
     ).animate(CurvedAnimation(
       parent: _scoreAnimationController,
+      curve: Curves.easeOut,
+    ));
+    
+    _settingsRotationAnimation = Tween<double>(
+      begin: 0.0,
+      end: 0.375, // 135 gradi (3/8 di giro)
+    ).animate(CurvedAnimation(
+      parent: _settingsAnimationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    _settingsButtonsOpacityAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _settingsAnimationController,
+      curve: Curves.easeOut,
+    ));
+    
+    _settingsButtonsScaleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _settingsAnimationController,
+      curve: Curves.elasticOut,
+    ));
+    
+    _searchWidthAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _searchAnimationController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    _searchOpacityAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _searchAnimationController,
       curve: Curves.easeOut,
     ));
     
@@ -452,6 +518,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     _fadeAnimationController.dispose();
     _slideAnimationController.dispose();
     _scoreAnimationController.dispose();
+    _settingsAnimationController.dispose();
+    _searchAnimationController.dispose();
     
     // Pulisci le animazioni delle stelle
     _starAnimationControllers.values.forEach((controller) => controller.dispose());
@@ -480,6 +548,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     _displayNameController.dispose();
     _locationController.dispose();
     _friendsSearchController.dispose();
+    _friendsSearchFocusNode.dispose();
     
     // Cancella la subscription degli amici
     _friendsSubscription?.cancel();
@@ -793,6 +862,29 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     
     _scoreAnimationController.reset();
     _scoreAnimationController.forward();
+  }
+
+  // Funzione per abbreviare i numeri superiori a 999
+  String _abbreviateNumber(int number) {
+    if (number < 1000) {
+      return number.toString();
+    } else if (number < 1000000) {
+      return '${(number / 1000).toStringAsFixed(1)}K';
+    } else {
+      return '${(number / 1000000).toStringAsFixed(1)}M';
+    }
+  }
+  
+  void _toggleSettingsButtons() {
+    setState(() {
+      _showSettingsButtons = !_showSettingsButtons;
+    });
+    
+    if (_showSettingsButtons) {
+      _settingsAnimationController.forward();
+    } else {
+      _settingsAnimationController.reverse();
+    }
   }
 
   Future<void> _acceptFriendRequest(Map<String, dynamic> request, StateSetter? setModalState) async {
@@ -2435,13 +2527,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         profileData['coverImageSource'] = 'cloudflare_r2';
       }
       
-      // Salva tutto nella cartella profile
+      // Aggiorna solo i campi specificati nella cartella profile (preserva alreadyfriends, friends, etc.)
       await _database
           .child('users')
           .child('users')
           .child(_targetUserId)
           .child('profile')
-          .set(profileData);
+          .update(profileData);
           
               // Dati profilo salvati in Firebase nella cartella profile
       
@@ -2469,8 +2561,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   .child('users')
                   .child(_targetUserId)
                   .child('profile')
-                  .child('onboardingCompleted')
-                  .set(true);
+                  .update({'onboardingCompleted': true});
             }
           }
         }
@@ -2968,45 +3059,60 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // Estendi la cover dietro la status bar come nella pagina di auth
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
+      systemNavigationBarColor: isDark ? Color(0xFF121212) : Colors.white, // Mantieni il colore di sfondo
+      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
     
     return Theme(
       data: Theme.of(context).copyWith(
         brightness: theme.brightness,
-        scaffoldBackgroundColor: theme.brightness == Brightness.dark 
-            ? Color(0xFF121212) 
-            : Colors.white,
+        scaffoldBackgroundColor: isDark ? Color(0xFF121212) : Colors.white,
         cardColor: theme.brightness == Brightness.dark 
             ? Color(0xFF1E1E1E) 
             : Colors.white,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          background: theme.brightness == Brightness.dark 
-              ? Color(0xFF121212) 
-              : Colors.white,
+          background: isDark ? Color(0xFF121212) : Colors.white,
           surface: theme.brightness == Brightness.dark 
               ? Color(0xFF1E1E1E) 
               : Colors.white,
         ),
       ),
       child: Scaffold(
-        backgroundColor: theme.brightness == Brightness.dark 
-            ? Color(0xFF121212) 
-            : Colors.white,
+        backgroundColor: isDark ? Color(0xFF121212) : Colors.white,
+        extendBodyBehindAppBar: true,
+        extendBody: true,
         body: _isLoading
             ? Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF6C63FF)),
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  child: Lottie.asset(
+                    'assets/animations/MainScene.json',
+                    width: 120,
+                    height: 120,
+                    fit: BoxFit.contain,
+                    repeat: true,
+                    animate: true,
+                  ),
                 ),
               )
             : Stack(
                 children: [
-                  // Main content area - no padding, content can scroll behind floating header
-                  SafeArea(
-                    child: CustomScrollView(
-                      slivers: [
-                        // Header con immagine di copertina e profilo
-                        SliverToBoxAdapter(
-                          child: _buildProfileHeader(theme),
-                        ),
+                  // Main content area - la cover si estende dietro la status bar
+                  CustomScrollView(
+                    physics: BouncingScrollPhysics(),
+                    slivers: [
+                      // Header con immagine di copertina e profilo
+                      SliverToBoxAdapter(
+                        child: _buildProfileHeader(theme),
+                      ),
                         
                         // Statistiche (sovrapposte all'header)
                         SliverToBoxAdapter(
@@ -3048,16 +3154,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                         ),
                       ],
                     ),
-                  ),
+                  
                   
                   // Floating header
                   Positioned(
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: SafeArea(
-                      child: _buildHeader(context),
-                    ),
+                    child: SafeArea(child: _buildHeader(context)),
                   ),
                   
                   // Fluzar Score e bottone amicizia fissi in basso
@@ -3225,14 +3329,16 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     );
   }
   Widget _buildProfileHeader(ThemeData theme) {
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final totalHeight = 488 + statusBarHeight;
     return Container(
-      height: 488, // Aumentato per copertina più grande (+38px = 1cm)
+      height: totalHeight,
       child: Stack(
         children: [
-          // Immagine di copertina più grande
+          // Immagine di copertina estesa fino alle icone di sistema
           Container(
             width: double.infinity,
-            height: 388, // Copertina più alta (+38px = 1cm)
+            height: 388 + statusBarHeight,
             child: _selectedCoverImage != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.only(
@@ -3261,10 +3367,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     : _buildDefaultCoverImage(),
           ),
           
-          // Overlay scuro per migliorare la leggibilità
+          // Overlay scuro per migliorare la leggibilità (esteso fino alle icone di sistema)
           Container(
             width: double.infinity,
-            height: 388, // Aumentato di 38px = 1cm
+            height: 388 + statusBarHeight,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.only(
                 bottomLeft: Radius.circular(20),
@@ -3283,7 +3389,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           
           // Username del proprietario in alto a sinistra
           Positioned(
-            top: 74, // Spostato di 38px = 1cm più in basso
+            top: 74 + statusBarHeight,
             left: 16,
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -3316,18 +3422,28 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             ),
           ),
           
-          // Cover Image Edit Button (conditional)
+          // Settings Button with animated options (conditional)
           if (_isOwner)
             Positioned(
-              top: 74, // Spostato di 38px = 1cm più in basso
+              top: 74 + statusBarHeight,
               right: 16,
-              child: Row(
+              child: AnimatedBuilder(
+                animation: _settingsAnimationController,
+                builder: (context, child) {
+                  return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                      // Pulsanti animati (nascosti/mostrati)
+                      if (_showSettingsButtons) ...[
                   // Bottone modifica info
-                  Container(
+                        Transform.scale(
+                          scale: _settingsButtonsScaleAnimation.value,
+                          child: Opacity(
+                            opacity: _settingsButtonsOpacityAnimation.value,
+                            child: Container(
                     width: 28,
                     height: 28,
+                              margin: EdgeInsets.only(right: 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.6),
                       borderRadius: BorderRadius.circular(14),
@@ -3342,11 +3458,17 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       padding: EdgeInsets.zero,
                     ),
                   ),
-                  SizedBox(width: 8),
+                          ),
+                        ),
                   // Bottone cambio copertina
-                  Container(
+                        Transform.scale(
+                          scale: _settingsButtonsScaleAnimation.value,
+                          child: Opacity(
+                            opacity: _settingsButtonsOpacityAnimation.value,
+                            child: Container(
                     width: 28,
                     height: 28,
+                              margin: EdgeInsets.only(right: 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.6),
                       borderRadius: BorderRadius.circular(14),
@@ -3361,13 +3483,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       padding: EdgeInsets.zero,
                     ),
                   ),
-                  SizedBox(width: 8),
+                          ),
+                        ),
                   // Bottone amici
-                  Stack(
+                        Transform.scale(
+                          scale: _settingsButtonsScaleAnimation.value,
+                          child: Opacity(
+                            opacity: _settingsButtonsOpacityAnimation.value,
+                            child: Stack(
                     children: [
                       Container(
                         width: 28,
                         height: 28,
+                                  margin: EdgeInsets.only(right: 8),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.6),
                           borderRadius: BorderRadius.circular(14),
@@ -3384,6 +3512,62 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       ),
                       // Badge per le richieste in sospeso
                       if (_friendRequests.isNotEmpty)
+                                  Positioned(
+                                    top: 0,
+                                    right: 8,
+                                    child: Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFF6B6B),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          _friendRequests.length > 9 ? '9+' : _friendRequests.length.toString(),
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      // Pulsante impostazioni principale (sempre visibile)
+                      Stack(
+                        children: [
+                          Transform.rotate(
+                            angle: _settingsRotationAnimation.value * 2 * math.pi,
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: IconButton(
+                                icon: Icon(
+                                  Icons.settings,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
+                                onPressed: _toggleSettingsButtons,
+                                padding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ),
+                          // Badge per le richieste in sospeso (solo quando i pulsanti sono chiusi)
+                          if (_friendRequests.isNotEmpty && !_showSettingsButtons)
                         Positioned(
                           top: 0,
                           right: 0,
@@ -3413,15 +3597,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     ],
                   ),
                 ],
+                  );
+                },
               ),
             ),
           
-          // Immagine profilo al centro (come nell'immagine)
+          // Immagine profilo al centro (cliccabile per il proprietario)
           Positioned(
             bottom: 255, // Aggiunto 75 pixel (circa 2 cm) più in alto
             left: 0,
             right: 0,
             child: Center(
+              child: GestureDetector(
+                onTap: _isOwner ? _showProfileImagePickerDialog : null,
               child: Container(
                 width: 120,
                 height: 120,
@@ -3439,7 +3627,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     ),
                   ],
                 ),
-                child: ClipOval(
+                  child: Stack(
+                    children: [
+                      // Immagine profilo
+                      ClipOval(
+                        child: Container(
+                          width: 120,
+                          height: 120,
                   child: _selectedProfileImage != null
                       ? Image.file(
                           _selectedProfileImage!,
@@ -3456,71 +3650,28 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                           : _buildDefaultProfileImage(),
                 ),
               ),
-            ),
-          ),
-          
-
-          
-          // Pulsante per cambiare immagine profilo (solo per il proprietario)
-          if (_isOwner)
-            Positioned(
-              bottom: 255, // Stessa posizione dell'immagine profilo
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
+                      // Overlay di caricamento (solo quando sta caricando)
+                      if (_isUploadingImage && _isOwner)
+                        Container(
                   width: 120,
                   height: 120,
-                  child: Stack(
-                    children: [
-                      // Pulsante camera (più piccolo)
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 28,
-                          height: 28,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                const Color(0xFF6C63FF),
-                                const Color(0xFF8B7CF6),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF6C63FF).withOpacity(0.3),
-                                blurRadius: 6,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
+                            color: Colors.black.withOpacity(0.5),
                           ),
-                          child: _isUploadingImage
-                              ? Container(
-                                  width: 28,
-                                  height: 28,
                                   child: Center(
                                     child: SizedBox(
-                                      width: 12,
-                                      height: 12,
+                              width: 24,
+                              height: 24,
                                       child: CircularProgressIndicator(
-                                        strokeWidth: 2,
+                                strokeWidth: 3,
                                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                       ),
-                                    ),
-                                  ),
-                                )
-                              : IconButton(
-                                  icon: Icon(Icons.camera_alt, color: Colors.white, size: 14),
-                                  onPressed: _showProfileImagePickerDialog,
-                                  padding: EdgeInsets.zero,
                                 ),
                         ),
                       ),
                     ],
+                  ),
                   ),
                 ),
               ),
@@ -3588,9 +3739,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   }
   
   Widget _buildDefaultCoverImage() {
+    final statusBarHeight = MediaQuery.of(context).padding.top;
     return Container(
       width: double.infinity,
-      height: 388, // Aggiornata per la nuova dimensione (+38px = 1cm)
+      height: 388 + statusBarHeight,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.only(
           bottomLeft: Radius.circular(20),
@@ -5722,10 +5874,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     ).createShader(bounds);
                   },
                   child: Text(
-                    _scoreAnimation.value.toInt().toString(),
+                    _abbreviateNumber(_scoreAnimation.value.toInt()),
                     style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22, // Aumentato da 18 a 22
+                      color: theme.brightness == Brightness.dark ? Colors.white : Colors.purple,
+                      fontSize: 19, // Ridotto da 22 a 16
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -6031,16 +6183,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   children: [
                     Text(
                       'Your Fluzar Score is a measure of your social media success and consistency',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Theme.of(context).textTheme.bodyMedium?.color,
-                        height: 1.4,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'It increases based on:',
                       style: TextStyle(
                         fontSize: 14,
                         color: Theme.of(context).textTheme.bodyMedium?.color,
@@ -6732,13 +6874,22 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   void _showFriendsListBottomSheet() {
     // Reset search when opening the bottom sheet
     _friendsSearchController.clear();
+    _friendsSearchFocusNode.unfocus();
     _friendsSearchQuery = '';
+    _isSearchExpanded = false;
+    
+    // Inizializza il controller se non è già stato fatto
+    if (!_searchAnimationController.isCompleted && !_searchAnimationController.isAnimating) {
+      _searchAnimationController.reset();
+    }
     
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
         return Container(
           height: MediaQuery.of(context).size.height * 0.7,
           decoration: BoxDecoration(
@@ -6760,82 +6911,152 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                 ),
               ),
               
-              // Header
+              // Header con search icon animata
               Padding(
                 padding: EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    // Titolo centrato
+                    // Titolo centrato che scompare quando la search si espande
+                    if (!_isSearchExpanded)
                     Expanded(
-                      child: Center(
-                        child: Text(
-                          'Friends (${_filteredFriends.length}/${_friends.length})',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).brightness == Brightness.dark 
-                                ? Colors.white70 
-                                : Colors.black54,
+                      child: Transform.translate(
+                        offset: Offset(20, 0),
+                        child: Center(
+                          child: Text(
+                              'Friends ${_friends.length}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Colors.white70 
+                                  : Colors.black54,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              
-              // Search bar
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
+                    
+                    // Search bar che si espande
+                    AnimatedContainer(
+                      duration: Duration(milliseconds: 400),
+                      curve: Curves.easeOutCubic,
+                      width: _isSearchExpanded 
+                          ? MediaQuery.of(context).size.width - 32 // Larghezza completa meno padding
+                          : 40,
+                      height: 40,
+                      child: _isSearchExpanded
+                          ? Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context).brightness == Brightness.dark 
                         ? Colors.grey[800] 
                         : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: Colors.grey.withOpacity(0.2),
+                                  color: const Color(0xFF6C63FF).withOpacity(0.3),
                       width: 1,
                     ),
                   ),
+                              child: Center(
                   child: TextField(
                     controller: _friendsSearchController,
+                                  focusNode: _friendsSearchFocusNode,
+                                  autofocus: false,
+                                  textAlignVertical: TextAlignVertical.center,
                     onChanged: (value) {
                       setState(() {
+                        _friendsSearchQuery = value;
+                      });
+                                    setModalState(() {
                         _friendsSearchQuery = value;
                       });
                     },
                     decoration: InputDecoration(
                       hintText: 'Search friends...',
+                                    hintStyle: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[500],
+                                    ),
                       prefixIcon: Icon(
                         Icons.search,
-                        color: Colors.grey[600],
+                                      color: const Color(0xFF6C63FF),
+                                      size: 20,
                       ),
-                      suffixIcon: _friendsSearchQuery.isNotEmpty
-                          ? IconButton(
+                                    suffixIcon: IconButton(
                               icon: Icon(
-                                Icons.clear,
+                                        Icons.close,
                                 color: Colors.grey[600],
+                                        size: 20,
                               ),
                               onPressed: () {
                                 _friendsSearchController.clear();
+                                        _friendsSearchFocusNode.unfocus();
                                 setState(() {
                                   _friendsSearchQuery = '';
+                                          _isSearchExpanded = false;
+                                        });
+                                        setModalState(() {
+                                          _friendsSearchQuery = '';
+                                          _isSearchExpanded = false;
                                 });
                               },
-                            )
-                          : null,
+                                    ),
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
+                                    contentPadding: EdgeInsets.zero,
+                                    isDense: true,
+                                  ),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    height: 1.0,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () {
+                                  setState(() {
+                                    _isSearchExpanded = true;
+                                  });
+                                  setModalState(() {
+                                    _isSearchExpanded = true;
+                                  });
+                                  
+                                  // Ritarda l'apertura della tastiera per completare l'animazione
+                                  Future.delayed(Duration(milliseconds: 400), () {
+                                    if (_isSearchExpanded && mounted) {
+                                      _friendsSearchFocusNode.requestFocus();
+                                    }
+                                  });
+                                },
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Colors.grey[800] 
+                                        : Colors.grey[100],
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: Colors.grey.withOpacity(0.2),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    Icons.search,
+                                    color: Colors.grey[600],
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                            ),
                     ),
-                  ),
+                  ],
                 ),
               ),
               
-              SizedBox(height: 16),
+              SizedBox(height: 8),
               
               // Friends list
               Expanded(
@@ -6918,19 +7139,57 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                               return Container(
                                 margin: EdgeInsets.only(bottom: 12),
                                 decoration: BoxDecoration(
+                                  // Effetto vetro semi-trasparente opaco
                                   color: Theme.of(context).brightness == Brightness.dark 
-                                      ? Colors.grey[800] 
-                                      : Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(12),
+                                      ? Colors.white.withOpacity(0.15) 
+                                      : Colors.white.withOpacity(0.25),
+                                  borderRadius: BorderRadius.circular(16),
+                                  // Bordo con effetto vetro più sottile
                                   border: Border.all(
-                                    color: Colors.grey.withOpacity(0.2),
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Colors.white.withOpacity(0.2)
+                                        : Colors.white.withOpacity(0.4),
                                     width: 1,
+                                  ),
+                                  // Ombra per effetto profondità e vetro
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Colors.black.withOpacity(0.4)
+                                          : Colors.black.withOpacity(0.15),
+                                      blurRadius: Theme.of(context).brightness == Brightness.dark ? 25 : 20,
+                                      spreadRadius: Theme.of(context).brightness == Brightness.dark ? 1 : 0,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                    // Ombra interna per effetto vetro
+                                    BoxShadow(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.white.withOpacity(0.6),
+                                      blurRadius: 2,
+                                      spreadRadius: -2,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                  // Gradiente più sottile per effetto vetro
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: Theme.of(context).brightness == Brightness.dark 
+                                        ? [
+                                            Colors.white.withOpacity(0.2),
+                                            Colors.white.withOpacity(0.1),
+                                          ]
+                                        : [
+                                            Colors.white.withOpacity(0.3),
+                                            Colors.white.withOpacity(0.2),
+                                          ],
                                   ),
                                 ),
                                 child: Material(
                                   color: Colors.transparent,
                                   child: InkWell(
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(16),
                                     onTap: () {
                                       Navigator.pop(context);
                                       // Navigate to friend's profile
@@ -7018,6 +7277,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                                                 _removeFriend(
                                                   friend['friendId'] ?? friend['uid'],
                                                   displayName,
+                                                  setModalState, // Passa setModalState per aggiornare la tendina
                                                 );
                                               },
                                               tooltip: 'Remove Friend',
@@ -7033,6 +7293,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               ),
             ],
           ),
+        );
+          },
         );
       },
     );
@@ -7053,65 +7315,140 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     }).toList();
   }
 
-  Future<void> _removeFriend(String friendId, String friendDisplayName) async {
+  Future<void> _removeFriend(String friendId, String friendDisplayName, [StateSetter? setModalState]) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    // Mostra dialog di conferma
+    // Mostra dialog di conferma minimal e professionale
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) {
-        return AlertDialog(
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+        
+        return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
           ),
-          title: Row(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: isDark ? Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.person_remove,
-                color: Colors.red,
-                size: 24,
-              ),
-              SizedBox(width: 8),
+                // Icona minimal
+                Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.person_remove_outlined,
+                    color: Colors.red[600],
+                    size: 32,
+                  ),
+                ),
+                
+                SizedBox(height: 20),
+                
+                // Titolo minimal
               Text(
                 'Remove Friend',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                    letterSpacing: -0.5,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-            ],
-          ),
-          content: Text(
-            'Are you sure you want to remove $friendDisplayName from your friends list? This action cannot be undone.',
-            style: TextStyle(fontSize: 16),
-          ),
-          actions: [
-            TextButton(
+                
+                SizedBox(height: 12),
+                
+                // Messaggio conciso
+                Text(
+                  'Remove $friendDisplayName from your friends?',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                
+                SizedBox(height: 24),
+                
+                // Pulsanti minimal
+                Row(
+                  children: [
+                    // Pulsante Cancel
+                    Expanded(
+                      child: OutlinedButton(
               onPressed: () => Navigator.of(context).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isDark ? Colors.white70 : Colors.black54,
+                          side: BorderSide(
+                            color: isDark ? Colors.white24 : Colors.grey[300]!,
+                            width: 1,
+                          ),
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
               child: Text(
                 'Cancel',
                 style: TextStyle(
-                  color: Colors.grey[600],
                   fontSize: 16,
+                            fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-            ElevatedButton(
+                    ),
+                    
+                    SizedBox(width: 12),
+                    
+                    // Pulsante Remove
+                    Expanded(
+                      child: ElevatedButton(
               onPressed: () => Navigator.of(context).pop(true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                          backgroundColor: Colors.red[600],
                 foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(12),
                 ),
+                          elevation: 0,
               ),
               child: Text(
                 'Remove',
-                style: TextStyle(fontSize: 16),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
               ),
             ),
           ],
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -7138,6 +7475,18 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           .child('alreadyfriends')
           .child(currentUser.uid)
           .remove();
+
+      // Aggiorna immediatamente la lista locale degli amici
+      setState(() {
+        _friends.removeWhere((friend) => (friend['friendId'] ?? friend['uid']) == friendId);
+      });
+      
+      // Aggiorna anche la tendina se è aperta
+      if (setModalState != null) {
+        setModalState(() {
+          _friends.removeWhere((friend) => (friend['friendId'] ?? friend['uid']) == friendId);
+        });
+      }
 
       // Mostra messaggio di successo
       ScaffoldMessenger.of(context).showSnackBar(
@@ -7187,10 +7536,17 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     if (_currentUser == null) return false;
     
     final starUsersRaw = video['star_users'];
-    if (starUsersRaw == null || starUsersRaw is! Map) return false;
+    if (starUsersRaw == null) return false;
     
-    final starUsers = Map<String, dynamic>.from(starUsersRaw);
-    return starUsers.containsKey(_currentUser!.uid);
+    // Gestione robusta per iOS: può arrivare come Map o List
+    if (starUsersRaw is Map) {
+      final starUsers = Map<String, dynamic>.from(starUsersRaw);
+      return starUsers.containsKey(_currentUser!.uid);
+    } else if (starUsersRaw is List) {
+      // Alcune serializzazioni possono salvare l'elenco di userId come lista
+      return starUsersRaw.contains(_currentUser!.uid);
+    }
+    return false;
   }
   void _triggerStarAnimation(String videoId) {
     _initializeStarAnimation(videoId);
@@ -7267,29 +7623,46 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       
       // Aggiorna il conteggio totale delle stelle
       await videoRef.child('star_count').set(newStarCount);
-      
-      // Aggiorna lo stato locale
-      setState(() {
-        // Aggiorna il conteggio stelle nel video locale
-        if (video.containsKey('star_count')) {
+
+      // Verifica finale dello stato su Firebase per sicurezza (fix iOS)
+      final finalStarSnapshot = await starUsersRef.child(currentUserId).get();
+      final bool finalStarState = finalStarSnapshot.exists;
+
+      // Aggiorna lo stato locale in base allo stato finale verificato
+      if (mounted) {
+        setState(() {
+          // Aggiorna il conteggio stelle nel video locale
           video['star_count'] = newStarCount;
-        }
-        // Aggiorna lo stato della stella per l'utente corrente
-        if (video.containsKey('star_users')) {
-          if (video['star_users'] == null) {
+
+          // Garantisce che star_users sia una mappa
+          final dynamic localStarUsers = video['star_users'];
+          if (localStarUsers == null || localStarUsers is! Map) {
             video['star_users'] = <String, dynamic>{};
-          } else if (video['star_users'] is Map) {
-            final starUsers = Map<String, dynamic>.from(video['star_users']);
-            if (hasUserStarred) {
-              starUsers.remove(currentUserId);
-            } else {
-              starUsers[currentUserId] = true;
-            }
-            video['star_users'] = starUsers;
           }
-        }
-      });
-      
+          if (video['star_users'] is Map) {
+            if (finalStarState) {
+              (video['star_users'] as Map)[currentUserId] = true;
+            } else {
+              (video['star_users'] as Map).remove(currentUserId);
+            }
+          }
+        });
+      }
+
+      // Ricarica lo stato attuale da Firebase per sincronizzare
+      if (mounted) {
+        try {
+          final refreshSnapshot = await videoRef.get();
+          if (refreshSnapshot.exists && refreshSnapshot.value is Map) {
+            final refreshedVideo = Map<String, dynamic>.from(refreshSnapshot.value as Map);
+            setState(() {
+              video['star_count'] = refreshedVideo['star_count'] ?? newStarCount;
+              video['star_users'] = refreshedVideo['star_users'] ?? video['star_users'];
+            });
+          }
+        } catch (_) {}
+      }
+
               // Stelle aggiornate per il video
       
       // Mostra feedback visivo
@@ -7359,8 +7732,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       
       int commentCount = 0;
       if (commentsSnapshot.exists) {
-        final comments = commentsSnapshot.value as Map<dynamic, dynamic>;
-        commentCount = comments.length;
+        final dynamic raw = commentsSnapshot.value;
+        if (raw is Map) {
+          commentCount = raw.length;
+        } else if (raw is List) {
+          // Alcune serializzazioni iOS possono salvare come lista
+          commentCount = raw.where((e) => e != null).length;
+        }
       }
       
       // Salva in cache
@@ -7838,7 +8216,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   );
                 }
                 
-                final commentsData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>?;
+                final dynamic rawComments = snapshot.data!.snapshot.value;
+                Map<dynamic, dynamic>? commentsData;
+                if (rawComments is Map) {
+                  commentsData = rawComments;
+                } else if (rawComments is List) {
+                  // Converte una lista in mappa con indice come chiave
+                  commentsData = {
+                    for (int i = 0; i < rawComments.length; i++)
+                      if (rawComments[i] != null) i.toString(): rawComments[i]
+                  };
+                } else {
+                  commentsData = null;
+                }
                 if (commentsData == null || commentsData.isEmpty) {
                   return Center(
                     child: Column(
@@ -8000,6 +8390,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       );
                       commentController.clear();
                       commentFocusNode.unfocus();
+                      FocusScope.of(context).unfocus();
                     }
                   },
                   child: Container(
@@ -8749,6 +9140,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                           await _submitReply(parentComment, videoUserId, replyController.text.trim());
                           replyController.clear();
                           replyFocusNode.unfocus();
+                          FocusScope.of(context).unfocus();
                           Navigator.pop(context);
                         }
                       },
@@ -9288,6 +9680,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                             await _submitReply(parentComment, videoUserId, text.trim());
                             replyController.clear();
                             replyFocusNode.unfocus();
+                            FocusScope.of(context).unfocus();
                           }
                         },
                       ),
@@ -9303,6 +9696,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                         await _submitReply(parentComment, videoUserId, replyController.text.trim());
                         replyController.clear();
                         replyFocusNode.unfocus();
+                        FocusScope.of(context).unfocus();
                       }
                     },
                     child: Container(

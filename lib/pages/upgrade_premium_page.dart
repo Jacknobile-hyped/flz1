@@ -703,7 +703,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             slivers: [
               SliverPadding(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).size.height * 0.05, // 11% dell'altezza dello schermo
+                  top: MediaQuery.of(context).size.height * 0.05 + 30, // 11% dell'altezza dello schermo + 20px
                 ),
                 sliver: SliverToBoxAdapter(
                   child: _buildHeroHeader(context),
@@ -714,7 +714,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
               ),
               SliverPadding(
                 padding: EdgeInsets.only(
-                  bottom: 180 + MediaQuery.of(context).size.height * 0.13, // 160px + 7% dell'altezza dello schermo (aumentato di 10px)
+                  bottom: 130 + MediaQuery.of(context).size.height * 0.0, // 130px + 7% dell'altezza dello schermo (diminuito di 50px)
                 ),
               ),
             ],
@@ -734,7 +734,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
     final theme = Theme.of(context);
 
     return Container(
-      height: 250,
+      height: 140,
       child: SafeArea(
         child: Center(
           child: Container(
@@ -755,10 +755,11 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Unlock the full potential',
+                  'Unlock full potential',
                   style: theme.textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
+                    fontSize: 20,
                     shadows: [
                       Shadow(
                         color: Colors.black.withOpacity(0.3),
@@ -769,12 +770,13 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 6),
                 Text(
                   'More power, more automation, more visibility with Fluzar pro',
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.bodyLarge?.copyWith(
                     color: Colors.white.withOpacity(0.9),
                     fontWeight: FontWeight.w500,
+                    fontSize: 14,
                     letterSpacing: 0.5,
                   ),
                   textAlign: TextAlign.center,
@@ -910,6 +912,11 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
               'icon': Icons.free_breakfast,
               'isAvailable': true,
             },
+          {
+            'text': 'Save 28%',
+            'icon': Icons.savings,
+            'isAvailable': true,
+          },
         ],
       },
     ];
@@ -919,7 +926,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
       children: [
 
         SizedBox(
-          height: 350,
+          height: 370,
           child: PageView.builder(
             controller: _pageController,
             onPageChanged: (index) {
@@ -1164,27 +1171,23 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             // Mostra la freccia solo se l'utente non è premium dal profilo o se il piano selezionato non è Basic
-            if (!_isUserPremiumFromProfile || _selectedPlan != 0)
+            if ((!_isUserPremiumFromProfile || _selectedPlan != 0) && !_isMenuExpanded)
               GestureDetector(
                 onTap: () {
                   setState(() {
                     // Non permettere di aprire la tendina se l'utente è premium dal profilo e il piano è Basic
                     if (!(_isUserPremiumFromProfile && _selectedPlan == 0)) {
-                      _isMenuExpanded = !_isMenuExpanded;
+                      _isMenuExpanded = true;
                     }
                   });
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: AnimatedRotation(
-                    duration: const Duration(milliseconds: 300),
-                    turns: _isMenuExpanded ? 0.5 : 0,
-                    child: Icon(
-                      Icons.keyboard_arrow_up,
-                      color: isDark ? Colors.white : Colors.black87,
-                      size: 20,
-                    ),
+                  child: Icon(
+                    Icons.keyboard_arrow_up,
+                    color: isDark ? Colors.white : Colors.black87,
+                    size: 20,
                   ),
                 ),
               ),
@@ -1198,65 +1201,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
               ),
               secondChild: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              selectedPlan['title'] as String,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            if (selectedPlan['savings'] != null) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                selectedPlan['savings'] as String,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.primaryColor,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          ShaderMask(
-                            shaderCallback: (Rect bounds) {
-                              return LinearGradient(
-                                colors: [
-                                  Color(0xFF667eea), // Colore iniziale: blu violaceo
-                                  Color(0xFF764ba2), // Colore finale: viola
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                              ).createShader(bounds);
-                            },
-                            child: Text(
-                              selectedPlan['price'] as String,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            selectedPlan['period'] as String,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark ? Colors.grey[400] : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                      // Calcolo tasse silenzioso - nessun testo visibile per l'utente
-                    ],
-                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
