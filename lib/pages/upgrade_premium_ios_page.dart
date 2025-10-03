@@ -11,9 +11,10 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:flutter/services.dart';
 
 class UpgradePremiumIOSPage extends StatefulWidget {
-  const UpgradePremiumIOSPage({super.key, this.suppressExtraPadding = false});
+  const UpgradePremiumIOSPage({super.key, this.suppressExtraPadding = false, this.fromGettingStarted = false});
 
   final bool suppressExtraPadding;
+  final bool fromGettingStarted;
 
   @override
   State<UpgradePremiumIOSPage> createState() => _UpgradePremiumIOSPageState();
@@ -874,7 +875,9 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
             slivers: [
               SliverPadding(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).size.height * 0.05 + 25,
+                  top: widget.fromGettingStarted 
+                      ? MediaQuery.of(context).size.height * 0.05 + 25 + 100 - 10 // Ridotto di 70 pixel se arriva da Getting Started
+                      : MediaQuery.of(context).size.height * 0.05 + 25 + 100,
                 ),
                 sliver: SliverToBoxAdapter(
                   child: _buildHeroHeader(context),
@@ -902,91 +905,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   }
 
   Widget _buildHeroHeader(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return SizedBox(
-      height: 200,
-      child: SafeArea(
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 24),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Unlock full potential',
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withOpacity(0.3),
-                              offset: const Offset(0, 2),
-                              blurRadius: 4,
-                            ),
-                          ],
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    if (Platform.isIOS) ...[
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () => _showIAPLogsDialog(),
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.3),
-                              width: 1,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.bug_report_outlined,
-                            size: 16,
-                            color: Colors.white.withOpacity(0.8),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'More power, more automation, more visibility with Fluzar pro',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: Colors.white.withOpacity(0.9),
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                    letterSpacing: 0.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildPlansCarousel(BuildContext context) {

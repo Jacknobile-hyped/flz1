@@ -47,13 +47,84 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
   int _displayedCredits = 0;
   bool _isPremium = true; // Sempre true per questa pagina
   
+  // Jackpot-style numeric animation for trend scores
+  late AnimationController _trendScoreNumberController;
+  late Animation<double> _trendScoreNumberAnimation;
+  double _displayedTrendScore = 0.0;
+  
   // Variable to track notification permission status
   bool? _pushNotificationsEnabled;
   bool _notificationDialogShown = false;
+  
+  // Animation controllers for trend data
+  late AnimationController _trendChartAnimationController;
+  late AnimationController _trendScoreAnimationController;
+  late Animation<double> _trendChartAnimation;
+  late Animation<double> _trendScoreAnimation;
+  
+  // Page controller for horizontal scrolling
+  late PageController _trendPageController;
+  int _currentTrendIndex = 0;
+  
+  // Animation controller for typing effect
+  late AnimationController _typingAnimationController;
+  late Animation<double> _typingAnimation;
 
   @override
   void initState() {
     super.initState();
+    
+    // Initialize animation controllers
+    _trendChartAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _trendChartAnimation = CurvedAnimation(
+      parent: _trendChartAnimationController,
+      curve: Curves.easeOutCubic,
+    );
+    
+    _trendScoreAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _trendScoreAnimation = CurvedAnimation(
+      parent: _trendScoreAnimationController,
+      curve: Curves.easeOutCubic,
+    );
+    
+    // Initialize page controller for horizontal scrolling
+    _trendPageController = PageController(viewportFraction: 0.9);
+    
+    // Initialize typing animation controller
+    _typingAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000), // 2 secondi per il typing
+    );
+    _typingAnimation = CurvedAnimation(
+      parent: _typingAnimationController,
+      curve: Curves.easeInOut,
+    );
+    
+    // Initialize jackpot-style numeric animation controller for trend scores
+    _trendScoreNumberController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500), // 1.5 secondi per l'animazione jackpot
+    );
+    _trendScoreNumberAnimation = Tween<double>(begin: 0, end: 0).animate(
+      CurvedAnimation(
+        parent: _trendScoreNumberController,
+        curve: Curves.easeOutCubic, // Curva di animazione più naturale
+      ),
+    );
+    
+    // Listener per aggiornare il valore visualizzato durante l'animazione del numero
+    _trendScoreNumberAnimation.addListener(() {
+      setState(() {
+        _displayedTrendScore = _trendScoreNumberAnimation.value;
+      });
+    });
+    
     _loadVideos();
     loadSocialAccounts();
     _loadUpcomingScheduledPosts();
@@ -157,7 +228,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
           });
           
           // Check for notification permission dialog
-          _checkNotificationPermission();
+          // _checkNotificationPermission(); // DISABLED: Notification popup disabled
         }
       } catch (e) {
         print('Error checking push notifications status: $e');
@@ -348,6 +419,19 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
         setState(() {
           _topTrends = topTrends;
         });
+        // Start animations after data is loaded
+        _trendChartAnimationController.reset();
+        _trendScoreAnimationController.reset();
+        _typingAnimationController.reset();
+        _trendChartAnimationController.forward();
+        _trendScoreAnimationController.forward();
+        _typingAnimationController.forward();
+        
+        // Start jackpot-style animation for the first trend score
+        if (topTrends.isNotEmpty) {
+          final firstTrendScore = topTrends[0]['virality_score'] as num? ?? 0.0;
+          _startTrendScoreAnimation(firstTrendScore.toDouble());
+        }
       }
     } catch (e) {
       print('Error loading top trends: $e');
@@ -846,6 +930,14 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                       : _buildVideosTab(theme),
             ),
             
+            // Getting Started Floating Button - mostra solo se non tutti i passi sono completati
+            if (!(_hasConnectedAccounts && _hasUploadedVideo))
+              Positioned(
+                bottom: 95, // Spostato 15 pixel più in basso (da 110 a 95)
+                right: 20,
+                child: _buildGettingStartedFloatingButton(theme),
+              ),
+            
 
           ],
         ),
@@ -865,16 +957,15 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20.0, 0.0, 20.0, 20.0),
+          padding: const EdgeInsets.fromLTRB(16.0, 0.0, 16.0, 16.0),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               _buildUpcomingScheduledPosts(theme),
               _buildCreditsIndicator(theme),
               _buildTrendsCard(theme),
               _buildCommunityCard(theme),
-              const SizedBox(height: 34),
-              _buildOnboardingList(theme),
-              const SizedBox(height: 116), // Aumentato di 2 cm (76px)
+              const SizedBox(height: 20),
+              const SizedBox(height: 90), // Ridotto lo spazio in basso
             ]),
           ),
         ),
@@ -894,16 +985,15 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20.0, 0.0, 20.0, 20.0),
+          padding: const EdgeInsets.fromLTRB(16.0, 0.0, 16.0, 16.0),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               _buildUpcomingScheduledPosts(theme),
               _buildCreditsIndicator(theme),
               _buildTrendsCard(theme),
               _buildCommunityCard(theme),
-              const SizedBox(height: 34),
-              _buildOnboardingList(theme),
-              const SizedBox(height: 116), // Aumentato di 2 cm (76px)
+              const SizedBox(height: 20),
+              const SizedBox(height: 90), // Ridotto lo spazio in basso
             ]),
           ),
         ),
@@ -911,444 +1001,6 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
     );
   }
 
-  Widget _buildOnboardingList(ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    // Hide the section if all steps are completed
-    if (_hasConnectedAccounts && _hasUploadedVideo) {
-      return const SizedBox.shrink();
-    }
-    final List<Map<String, dynamic>> steps = [
-      {
-        'number': 1,
-        'title': 'Connect Your Social Accounts',
-        'description': 'Link your social media accounts to start sharing content',
-        'isCompleted': _hasConnectedAccounts,
-        'onTap': () {
-          Navigator.pushNamed(context, '/accounts').then((_) {
-            loadSocialAccounts();
-            checkUserProgress();
-          });
-        },
-        'key': _connectAccountsKey,
-        'icon': Icons.link,
-      },
-      {
-        'number': 2,
-        'title': 'Upload Your First Video',
-        'description': 'Create and share your first video across your connected platforms',
-        'isCompleted': _hasUploadedVideo,
-        'onTap': () {
-          Navigator.pushNamed(context, '/upload').then((_) {
-            _loadVideos();
-            checkUserProgress();
-          });
-        },
-        'key': _uploadVideoKey,
-        'icon': Icons.video_library,
-      },
-      {
-        'number': 3,
-        'title': 'Premium Active',
-        'description': 'Enjoy unlimited uploads and premium features',
-        'isCompleted': true,
-        'onTap': () {},
-        'key': null,
-        'icon': Icons.star,
-      },
-    ];
-    int completedSteps = steps.where((step) => step['isCompleted'] as bool).length;
-    int totalSteps = steps.length;
-    int currentStep = completedSteps < totalSteps ? completedSteps + 1 : totalSteps;
-    List<Widget> stepWidgets = [];
-    stepWidgets.add(
-      Container(
-        margin: EdgeInsets.only(left: 22.5),
-        width: 3,
-        height: 15,
-        decoration: BoxDecoration(
-          gradient: steps[0]['isCompleted'] as bool 
-              ? LinearGradient(
-                  colors: [
-                    Color(0xFF667eea),
-                    Color(0xFF764ba2),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  transform: GradientRotation(135 * 3.14159 / 180),
-                )
-              : null,
-          color: steps[0]['isCompleted'] as bool ? null : Colors.grey.shade300,
-        ),
-      ),
-    );
-    for (int i = 0; i < steps.length; i++) {
-      final step = steps[i];
-      final isActive = (i + 1) <= currentStep;
-      final isCompleted = step['isCompleted'] as bool;
-      stepWidgets.add(
-        _buildStepItem(
-          theme,
-          number: step['number'] as int,
-          title: step['title'] as String,
-          description: step['description'] as String,
-          isActive: isActive,
-          isCompleted: isCompleted,
-          icon: step['icon'] as IconData,
-          onTap: step['onTap'] as VoidCallback,
-          key: step['key'] as Key?,
-        ),
-      );
-      if (i < steps.length - 1) {
-        stepWidgets.add(
-          Container(
-            margin: EdgeInsets.only(left: 22.5),
-            width: 3,
-            height: 30,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  isCompleted 
-                      ? Color(0xFF667eea)
-                      : Colors.grey.shade300,
-                  i + 1 < currentStep 
-                      ? Color(0xFF764ba2)
-                      : Colors.grey.shade300,
-                ],
-                transform: GradientRotation(135 * 3.14159 / 180),
-              ),
-            ),
-          ),
-        );
-      } else {
-        stepWidgets.add(
-          Container(
-            margin: EdgeInsets.only(left: 22.5),
-            width: 3,
-            height: 15,
-            decoration: BoxDecoration(
-              gradient: isCompleted 
-                  ? LinearGradient(
-                      colors: [
-                        Color(0xFF667eea),
-                        Color(0xFF764ba2),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      transform: GradientRotation(135 * 3.14159 / 180),
-                    )
-                  : null,
-              color: isCompleted ? null : Colors.grey.shade300,
-            ),
-          ),
-        );
-      }
-    }
-    return Container(
-      margin: const EdgeInsets.only(top: 18, bottom: 10),
-      decoration: BoxDecoration(
-        // Effetto vetro semi-trasparente opaco
-        color: isDark 
-            ? Colors.white.withOpacity(0.15) 
-            : Colors.white.withOpacity(0.25),
-        borderRadius: BorderRadius.circular(20),
-        // Bordo con effetto vetro più sottile
-        border: Border.all(
-          color: isDark 
-              ? Colors.white.withOpacity(0.2)
-              : Colors.white.withOpacity(0.4),
-          width: 1,
-        ),
-        // Ombra per effetto profondità e vetro
-        boxShadow: [
-          BoxShadow(
-            color: isDark 
-                ? Colors.black.withOpacity(0.4)
-                : Colors.black.withOpacity(0.15),
-            blurRadius: isDark ? 25 : 20,
-            spreadRadius: isDark ? 1 : 0,
-            offset: const Offset(0, 10),
-          ),
-          // Ombra interna per effetto vetro
-          BoxShadow(
-            color: isDark 
-                ? Colors.white.withOpacity(0.1)
-                : Colors.white.withOpacity(0.6),
-            blurRadius: 2,
-            spreadRadius: -2,
-            offset: const Offset(0, 2),
-          ),
-        ],
-        // Gradiente più sottile per effetto vetro
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark 
-              ? [
-                  Colors.white.withOpacity(0.2),
-                  Colors.white.withOpacity(0.1),
-                ]
-              : [
-                  Colors.white.withOpacity(0.3),
-                  Colors.white.withOpacity(0.2),
-                ],
-        ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return LinearGradient(
-                    colors: [
-                      Color(0xFF667eea),
-                      Color(0xFF764ba2),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180),
-                  ).createShader(bounds);
-                },
-                child: Text(
-                  'Getting Started',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF667eea).withOpacity(0.1),
-                      Color(0xFF764ba2).withOpacity(0.1),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180),
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ShaderMask(
-                  shaderCallback: (Rect bounds) {
-                    return LinearGradient(
-                      colors: [
-                        Color(0xFF667eea),
-                        Color(0xFF764ba2),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      transform: GradientRotation(135 * 3.14159 / 180),
-                    ).createShader(bounds);
-                  },
-                  child: Text(
-                    '$completedSteps/$totalSteps Steps',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          // Add all the step widgets
-          ...stepWidgets,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepItem(
-    ThemeData theme, {
-    required int number,
-    required String title,
-    required String description,
-    required bool isActive,
-    required bool isCompleted,
-    required IconData icon,
-    required VoidCallback onTap,
-    Key? key,
-  }) {
-    final Color accentColor = isCompleted 
-        ? Color(0xFF667eea)
-        : isActive 
-            ? Color(0xFF667eea)
-            : Colors.grey.shade400;
-            
-    final Color backgroundColor = isCompleted 
-        ? Color(0xFF667eea).withOpacity(0.1)
-        : isActive 
-            ? Color(0xFF667eea).withOpacity(0.05)
-            : theme.colorScheme.surfaceVariant;
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          key: key,
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          margin: EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(
-            color: isActive ? theme.cardColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            border: (isActive || isCompleted)
-                ? Border.all(
-                    color: Color(0xFF667eea).withOpacity(0.6), 
-                    width: 2
-                  )
-                : null,
-            boxShadow: (isActive || isCompleted)
-                ? [
-                    BoxShadow(
-                      color: Color(0xFF667eea).withOpacity(0.15),
-                      blurRadius: 12,
-                      spreadRadius: 1,
-                      offset: Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: backgroundColor,
-                  border: Border.all(
-                    color: accentColor,
-                    width: theme.brightness == Brightness.dark && isActive ? 3 : 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: theme.brightness == Brightness.dark && isActive 
-                          ? Color(0xFF6C63FF).withOpacity(0.3)
-                          : accentColor.withOpacity(0.15),
-                      blurRadius: theme.brightness == Brightness.dark && isActive ? 12 : 8,
-                      spreadRadius: theme.brightness == Brightness.dark && isActive ? 3 : 2,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: isCompleted
-                      ? Icon(
-                          Icons.check,
-                          color: theme.brightness == Brightness.dark ? Color(0xFF6C63FF) : accentColor,
-                          size: 22,
-                        )
-                      : Text(
-                          number.toString(),
-                          style: TextStyle(
-                            color: isActive ? const Color(0xFF6C63FF) : accentColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: isActive ? theme.textTheme.bodyLarge?.color : Colors.grey.shade500,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: backgroundColor,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(
-                            icon,
-                            color: isCompleted && theme.brightness == Brightness.dark ? Color(0xFF6C63FF) : accentColor,
-                            size: 18,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        color: isActive ? Colors.grey.shade600 : Colors.grey.shade400,
-                        fontSize: 12,
-                      ),
-                    ),
-                    if (isActive && !isCompleted) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isActive ? const Color(0xFF6C63FF).withOpacity(0.1) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'Start this step',
-                          style: TextStyle(
-                            color: isActive ? const Color(0xFF6C63FF) : Colors.grey.shade400,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (isCompleted) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_outline,
-                            color: theme.brightness == Brightness.dark ? Color(0xFF6C63FF) : theme.primaryColor,
-                            size: 14,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Completed',
-                            style: TextStyle(
-                              color: theme.brightness == Brightness.dark ? Color(0xFF6C63FF) : theme.primaryColor,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildSocialAccountsStories(ThemeData theme, {bool showTabs = false}) {
     return Container(
@@ -1548,7 +1200,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                 color: theme.textTheme.bodyMedium?.color,
               ),
               textAlign: TextAlign.center,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -2345,7 +1997,25 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                 SizedBox(
                   height: 320, // Aumentata ulteriormente per il grafico
                   child: PageView.builder(
-                    controller: PageController(viewportFraction: 0.9),
+                    controller: _trendPageController,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentTrendIndex = index;
+                      });
+                      // Start animations when scrolling between trends
+                      _trendChartAnimationController.reset();
+                      _trendScoreAnimationController.reset();
+                      _typingAnimationController.reset();
+                      _trendChartAnimationController.forward();
+                      _trendScoreAnimationController.forward();
+                      _typingAnimationController.forward();
+                      
+                      // Start jackpot-style animation for the current trend score
+                      if (index < _topTrends.length) {
+                        final currentTrendScore = _topTrends[index]['virality_score'] as num? ?? 0.0;
+                        _startTrendScoreAnimation(currentTrendScore.toDouble());
+                      }
+                    },
                     itemCount: _topTrends.length,
                     itemBuilder: (context, index) {
                       final trend = _topTrends[index];
@@ -2359,44 +2029,28 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                 
                 const SizedBox(height: 16),
               ] else ...[
-                // Debug: mostra se stiamo caricando o se non ci sono trend
-                Row(
-                  children: [
-                    Text(
-                      'Loading trends...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark 
-                            ? Colors.white.withOpacity(0.6)
-                            : Color(0xFF1A1A1A).withOpacity(0.6),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        print('Force reloading trends...');
-                        _loadTopTrends();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isDark 
-                              ? Colors.white.withOpacity(0.2)
-                              : Colors.black.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
+                // Loading state with Lottie animation (like home_page.dart)
+                Container(
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.05)
+                        : Colors.black.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Lottie.asset(
+                          'assets/animations/MainScene.json',
+                          width: 200,
+                          height: 200,
+                          fit: BoxFit.contain,
                         ),
-                        child: Text(
-                          'Reload',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: isDark 
-                                ? Colors.white.withOpacity(0.8)
-                                : Colors.black.withOpacity(0.8),
-                          ),
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -2450,15 +2104,23 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                       
                       const Spacer(),
                       
-                      // Freccia più elegante
-                      Padding(
-                        padding: const EdgeInsets.only(right: 20),
+                      // Freccia con gradiente viola allineata con community card
+                      const SizedBox(width: 8),
+                      ShaderMask(
+                        shaderCallback: (Rect bounds) {
+                          return LinearGradient(
+                            colors: [
+                              const Color(0xFF667eea),
+                              const Color(0xFF764ba2),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ).createShader(bounds);
+                        },
                         child: Icon(
                           Icons.arrow_forward_ios,
-                          color: isDark 
-                              ? Colors.white.withOpacity(0.7)
-                              : Color(0xFF1A1A1A).withOpacity(0.6),
-                      size: 20,
+                          color: Colors.white,
+                          size: 16,
                         ),
                       ),
                     ],
@@ -2568,10 +2230,11 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
             
             const SizedBox(height: 6),
             
-            // Description
+            // Description with typing animation
             if (description.isNotEmpty)
-              Text(
-                description,
+              TypingTextWidget(
+                text: description,
+                animation: _typingAnimation,
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark 
@@ -2611,6 +2274,7 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
                     '${viralityScore.toStringAsFixed(0)}',
                     Icons.trending_up,
                     isDark,
+                    targetScore: viralityScore.toDouble(),
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -2639,46 +2303,57 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
     );
   }
 
-  Widget _buildCompactStatItem(String label, String value, IconData icon, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
-      decoration: BoxDecoration(
-        color: isDark 
-            ? Colors.white.withOpacity(0.05)
-            : Colors.black.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            size: 12,
+  Widget _buildCompactStatItem(String label, String value, IconData icon, bool isDark, {double? targetScore}) {
+    return AnimatedBuilder(
+      animation: _trendScoreAnimation,
+      builder: (context, child) {
+        // Use jackpot-style animation for score, regular value for others
+        String displayValue = value;
+        if (label == 'Score' && targetScore != null) {
+          displayValue = _displayedTrendScore.toStringAsFixed(0);
+        }
+        
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+          decoration: BoxDecoration(
             color: isDark 
-                ? Colors.white.withOpacity(0.7)
-                : Colors.black.withOpacity(0.7),
+                ? Colors.white.withOpacity(0.05)
+                : Colors.black.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
           ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: isDark 
-                  ? Colors.white.withOpacity(0.9)
-                  : Colors.black.withOpacity(0.9),
-            ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                size: 12,
+                color: isDark 
+                    ? Colors.white.withOpacity(0.7)
+                    : Colors.black.withOpacity(0.7),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                displayValue,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.9)
+                      : Colors.black.withOpacity(0.9),
+                ),
+              ),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 7,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.6)
+                      : Colors.black.withOpacity(0.6),
+                ),
+              ),
+            ],
           ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 7,
-              color: isDark 
-                  ? Colors.white.withOpacity(0.6)
-                  : Colors.black.withOpacity(0.6),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -2700,43 +2375,48 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
     final minValue = engagementValues.reduce(min);
     final range = maxValue - minValue;
     
-    return LineChart(
-      LineChartData(
-        gridData: FlGridData(show: false),
-        titlesData: FlTitlesData(show: false),
-        borderData: FlBorderData(show: false),
-        lineTouchData: LineTouchData(
-          enabled: false,
-        ),
-        lineBarsData: [
-          LineChartBarData(
-            spots: engagementValues.asMap().entries.map((e) {
-              final x = e.key.toDouble();
-              final y = range > 0 ? ((e.value - minValue) / range * 80).toDouble() : 40.0;
-              return FlSpot(x, y);
-            }).toList(),
-            isCurved: true,
-            color: const Color(0xFF667eea),
-            barWidth: 3,
-            isStrokeCapRound: true,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, barData, index) {
-                return FlDotCirclePainter(
-                  radius: 3,
-                  color: const Color(0xFF667eea),
-                  strokeWidth: 2,
-                  strokeColor: Colors.white,
-                );
-              },
+    return AnimatedBuilder(
+      animation: _trendChartAnimation,
+      builder: (context, child) {
+        return LineChart(
+          LineChartData(
+            gridData: FlGridData(show: false),
+            titlesData: FlTitlesData(show: false),
+            borderData: FlBorderData(show: false),
+            lineTouchData: LineTouchData(
+              enabled: false,
             ),
-            belowBarData: BarAreaData(
-              show: true,
-              color: const Color(0xFF667eea).withOpacity(0.1),
-            ),
+            lineBarsData: [
+              LineChartBarData(
+                spots: engagementValues.asMap().entries.map((e) {
+                  final x = e.key.toDouble();
+                  final y = range > 0 ? ((e.value - minValue) / range * 80).toDouble() : 40.0;
+                  return FlSpot(x, y * _trendChartAnimation.value);
+                }).toList(),
+                isCurved: true,
+                color: const Color(0xFF667eea),
+                barWidth: 3,
+                isStrokeCapRound: true,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, barData, index) {
+                    return FlDotCirclePainter(
+                      radius: 3,
+                      color: const Color(0xFF667eea),
+                      strokeWidth: 2,
+                      strokeColor: Colors.white,
+                    );
+                  },
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  color: const Color(0xFF667eea).withOpacity(0.1 * _trendChartAnimation.value),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -2871,9 +2551,12 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
   }
 
   Color _getPlatformColorForTrend(String platform) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
     switch (platform.toLowerCase()) {
       case 'tiktok':
-        return Colors.black;
+        return isDark ? Colors.white : Colors.black;
       case 'youtube':
         return Colors.red;
       case 'instagram':
@@ -2883,9 +2566,9 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
       case 'twitter':
         return Color(0xFF1DA1F2);
       case 'threads':
-        return Color(0xFF000000);
+        return isDark ? Colors.white : Color(0xFF000000);
       default:
-        return Colors.grey;
+        return isDark ? Colors.white : Colors.grey;
     }
   }
 
@@ -3216,6 +2899,567 @@ class PremiumHomePageState extends State<PremiumHomePage> with TickerProviderSta
 
   void refreshUserProgress() {
     checkUserProgress();
+  }
+
+  // Floating button for Getting Started
+  Widget _buildGettingStartedFloatingButton(ThemeData theme) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF667eea),
+            Color(0xFF764ba2),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          transform: GradientRotation(135 * 3.14159 / 180),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF667eea).withOpacity(0.3),
+            blurRadius: 12,
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () {
+            _showGettingStartedBottomSheet();
+          },
+          child: Center(
+            child: Icon(
+              Icons.lightbulb_outline,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Show Getting Started bottom sheet
+  void _showGettingStartedBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.75, // Ridotto dal 85% al 75% (10% in meno)
+          decoration: BoxDecoration(
+            color: theme.brightness == Brightness.dark ? Colors.grey[900]! : Colors.white,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(25),
+              topRight: Radius.circular(25),
+            ),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 16),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[400],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return const LinearGradient(
+                          colors: [
+                            Color(0xFF667eea),
+                            Color(0xFF764ba2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'Getting Started',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF667eea).withOpacity(0.1),
+                            const Color(0xFF764ba2).withOpacity(0.1),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: const GradientRotation(135 * 3.14159 / 180),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: ShaderMask(
+                        shaderCallback: (Rect bounds) {
+                          return const LinearGradient(
+                            colors: [
+                              Color(0xFF667eea),
+                              Color(0xFF764ba2),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            transform: GradientRotation(135 * 3.14159 / 180),
+                          ).createShader(bounds);
+                        },
+                        child: Text(
+                          '${_getCompletedStepsCount()}/${_getTotalStepsCount()} Steps',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Content
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _buildOnboardingStepsContent(theme),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Helper method to get completed steps count
+  int _getCompletedStepsCount() {
+    int count = 0;
+    if (_hasConnectedAccounts) count++;
+    if (_hasUploadedVideo) count++;
+    return count;
+  }
+
+  // Helper method to get total steps count
+  int _getTotalStepsCount() {
+    return 3;
+  }
+
+  // Content for the onboarding steps (extracted from the original method)
+  Widget _buildOnboardingStepsContent(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    
+    // Define the steps with their data
+    final List<Map<String, dynamic>> steps = [
+      {
+        'number': 1,
+        'title': 'Connect Your Social Accounts',
+        'description': 'Link your social media accounts to start sharing content',
+        'isCompleted': _hasConnectedAccounts,
+        'onTap': () {
+          Navigator.pushNamed(context, '/accounts').then((_) {
+            loadSocialAccounts();
+            checkUserProgress();
+          });
+        },
+        'key': _connectAccountsKey,
+        'icon': Icons.link,
+      },
+      {
+        'number': 2,
+        'title': 'Upload Your First Video',
+        'description': 'Create and share your first video across your connected platforms',
+        'isCompleted': _hasUploadedVideo,
+        'onTap': () {
+          Navigator.pushNamed(context, '/upload').then((_) {
+            _loadVideos();
+            checkUserProgress();
+          });
+        },
+        'key': _uploadVideoKey,
+        'icon': Icons.video_library,
+      },
+      {
+        'number': 3,
+        'title': 'Premium Active',
+        'description': 'Enjoy unlimited uploads and premium features',
+        'isCompleted': true,
+        'onTap': () {},
+        'key': null,
+        'icon': Icons.star,
+      },
+    ];
+
+    // Calculate current progress
+    int completedSteps = steps.where((step) => step['isCompleted'] as bool).length;
+    int totalSteps = steps.length;
+    int currentStep = completedSteps < totalSteps ? completedSteps + 1 : totalSteps;
+    
+    // Build the step widgets
+    List<Widget> stepWidgets = [];
+    
+    // Add a top decoration for the first step
+    stepWidgets.add(
+      Container(
+        margin: const EdgeInsets.only(left: 22.5),
+        width: 3,
+        height: 15,
+        decoration: BoxDecoration(
+          gradient: steps[0]['isCompleted'] as bool 
+              ? const LinearGradient(
+                  colors: [
+                    Color(0xFF667eea),
+                    Color(0xFF764ba2),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  transform: GradientRotation(135 * 3.14159 / 180),
+                )
+              : null,
+          color: steps[0]['isCompleted'] as bool ? null : Colors.grey.shade300,
+        ),
+      ),
+    );
+    
+    for (int i = 0; i < steps.length; i++) {
+      final step = steps[i];
+      final isActive = (i + 1) <= currentStep;
+      final isCompleted = step['isCompleted'] as bool;
+      stepWidgets.add(
+        _buildStepItem(
+          theme,
+          number: step['number'] as int,
+          title: step['title'] as String,
+          description: step['description'] as String,
+          isActive: isActive,
+          isCompleted: isCompleted,
+          icon: step['icon'] as IconData,
+          onTap: step['onTap'] as VoidCallback,
+          key: step['key'] as Key?,
+        ),
+      );
+      if (i < steps.length - 1) {
+        stepWidgets.add(
+          Container(
+            margin: const EdgeInsets.only(left: 22.5),
+            width: 3,
+            height: 30,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  isCompleted 
+                      ? const Color(0xFF667eea)
+                      : Colors.grey.shade300,
+                  i + 1 < currentStep 
+                      ? const Color(0xFF764ba2)
+                      : Colors.grey.shade300,
+                ],
+                transform: const GradientRotation(135 * 3.14159 / 180),
+              ),
+            ),
+          ),
+        );
+      } else {
+        stepWidgets.add(
+          Container(
+            margin: const EdgeInsets.only(left: 22.5),
+            width: 3,
+            height: 15,
+            decoration: BoxDecoration(
+              gradient: isCompleted 
+                  ? const LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    )
+                  : null,
+              color: isCompleted ? null : Colors.grey.shade300,
+            ),
+          ),
+        );
+      }
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: stepWidgets,
+    );
+  }
+
+  Widget _buildStepItem(
+    ThemeData theme, {
+    required int number,
+    required String title,
+    required String description,
+    required bool isActive,
+    required bool isCompleted,
+    required IconData icon,
+    required VoidCallback onTap,
+    Key? key,
+  }) {
+    final Color accentColor = isCompleted 
+        ? const Color(0xFF667eea)
+        : isActive 
+            ? const Color(0xFF667eea)
+            : Colors.grey.shade400;
+            
+    final Color backgroundColor = isCompleted 
+        ? const Color(0xFF667eea).withOpacity(0.1)
+        : isActive 
+            ? const Color(0xFF667eea).withOpacity(0.05)
+            : theme.colorScheme.surfaceVariant;
+            
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          key: key,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          decoration: BoxDecoration(
+            color: isActive ? theme.cardColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            border: (isActive || isCompleted)
+                ? Border.all(
+                    color: const Color(0xFF667eea).withOpacity(0.6), 
+                    width: 2
+                  )
+                : null,
+            boxShadow: (isActive || isCompleted)
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF667eea).withOpacity(0.15),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 45,
+                height: 45,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: backgroundColor,
+                  border: Border.all(
+                    color: accentColor,
+                    width: theme.brightness == Brightness.dark && isActive ? 3 : 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark && isActive 
+                          ? const Color(0xFF6C63FF).withOpacity(0.3)
+                          : accentColor.withOpacity(0.15),
+                      blurRadius: theme.brightness == Brightness.dark && isActive ? 12 : 8,
+                      spreadRadius: theme.brightness == Brightness.dark && isActive ? 3 : 2,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: isCompleted
+                      ? Icon(
+                          Icons.check,
+                          color: theme.brightness == Brightness.dark ? const Color(0xFF6C63FF) : accentColor,
+                          size: 22,
+                        )
+                      : Text(
+                          number.toString(),
+                          style: TextStyle(
+                            color: isActive ? const Color(0xFF6C63FF) : accentColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isActive ? theme.textTheme.bodyLarge?.color : Colors.grey.shade500,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: backgroundColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            icon,
+                            color: isCompleted && theme.brightness == Brightness.dark ? const Color(0xFF6C63FF) : accentColor,
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        color: isActive ? Colors.grey.shade600 : Colors.grey.shade400,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (isActive && !isCompleted) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isActive ? const Color(0xFF6C63FF).withOpacity(0.1) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Start this step',
+                          style: TextStyle(
+                            color: isActive ? const Color(0xFF6C63FF) : Colors.grey.shade400,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (isCompleted) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            color: theme.brightness == Brightness.dark ? const Color(0xFF6C63FF) : theme.primaryColor,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Completed',
+                            style: TextStyle(
+                              color: theme.brightness == Brightness.dark ? const Color(0xFF6C63FF) : theme.primaryColor,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // Metodo per avviare l'animazione jackpot-style del trend score
+  void _startTrendScoreAnimation(double targetScore) {
+    if (!mounted) return;
+    
+    // Aggiorna l'animazione del numero (fino al valore effettivo)
+    _trendScoreNumberAnimation = Tween<double>(
+      begin: 0,
+      end: targetScore,
+    ).animate(CurvedAnimation(
+      parent: _trendScoreNumberController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    // Avvia l'animazione
+    _trendScoreNumberController.forward(from: 0);
+    
+    print('Avviata animazione trend score: $targetScore');
+  }
+
+  @override
+  void dispose() {
+    _trendChartAnimationController.dispose();
+    _trendScoreAnimationController.dispose();
+    _trendScoreNumberController.dispose();
+    _trendPageController.dispose();
+    _typingAnimationController.dispose();
+    super.dispose();
+  }
+}
+
+// Custom widget for typing animation effect
+class TypingTextWidget extends StatelessWidget {
+  final String text;
+  final Animation<double> animation;
+  final TextStyle? style;
+  final int maxLines;
+  final TextOverflow overflow;
+
+  const TypingTextWidget({
+    Key? key,
+    required this.text,
+    required this.animation,
+    this.style,
+    this.maxLines = 2,
+    this.overflow = TextOverflow.ellipsis,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final visibleLength = (text.length * animation.value).round();
+        final visibleText = text.substring(0, visibleLength.clamp(0, text.length));
+        
+        return Text(
+          visibleText,
+          style: style,
+          maxLines: maxLines,
+          overflow: overflow,
+        );
+      },
+    );
   }
 }
 

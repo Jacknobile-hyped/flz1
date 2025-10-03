@@ -11,9 +11,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
 class UpgradePremiumPage extends StatefulWidget {
-  const UpgradePremiumPage({super.key, this.suppressExtraPadding = false});
+  const UpgradePremiumPage({super.key, this.suppressExtraPadding = false, this.fromGettingStarted = false});
 
   final bool suppressExtraPadding;
+  final bool fromGettingStarted;
 
   @override
   State<UpgradePremiumPage> createState() => _UpgradePremiumPageState();
@@ -703,7 +704,10 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             slivers: [
               SliverPadding(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).size.height * 0.05 + 30, // 11% dell'altezza dello schermo + 20px
+                  top: widget.fromGettingStarted 
+                      ? MediaQuery.of(context).size.height * 0.05 + 30 - 50 // Ridotto di 70 pixel se arriva da Getting Started
+                      : MediaQuery.of(context).size.height * 0.05 + 30, // 11% dell'altezza dello schermo + 20px
+                  bottom: widget.fromGettingStarted ? 40 : 0, // Aggiunto padding sotto se arriva da Getting Started
                 ),
                 sliver: SliverToBoxAdapter(
                   child: _buildHeroHeader(context),
@@ -734,12 +738,15 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
     final theme = Theme.of(context);
 
     return Container(
-      height: 140,
+      constraints: BoxConstraints(
+        minHeight: 120,
+        maxHeight: widget.fromGettingStarted ? 160 : 140, // Altezza maggiore se arriva da Getting Started
+      ),
       child: SafeArea(
         child: Center(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 24),
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16), // Ridotto padding da 20 a 16
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
@@ -759,7 +766,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
                   style: theme.textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize: 20,
+                    fontSize: 18, // Ridotto da 20 a 18
                     shadows: [
                       Shadow(
                         color: Colors.black.withOpacity(0.3),
@@ -776,7 +783,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: Colors.white.withOpacity(0.9),
                     fontWeight: FontWeight.w500,
-                    fontSize: 14,
+                    fontSize: 13, // Ridotto da 14 a 13
                     letterSpacing: 0.5,
                   ),
                   textAlign: TextAlign.center,

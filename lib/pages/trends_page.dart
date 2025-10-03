@@ -310,6 +310,10 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
   late Animation<double> _viewsChartAnimation;
   late Animation<double> _engagementChartAnimation;
   late Animation<double> _viralityScoreAnimation;
+  
+  // Typing animation controller
+  late AnimationController _typingAnimationController;
+  late Animation<double> _typingAnimation;
 
   // AI Chat variables
   List<ChatMessage> _chatMessages = [];
@@ -398,6 +402,16 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
       parent: _viralityScoreAnimationController,
       curve: Curves.easeOutCubic,
     );
+    
+    // Initialize typing animation
+    _typingAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000), // 2 secondi per il typing
+    );
+    _typingAnimation = CurvedAnimation(
+      parent: _typingAnimationController,
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
@@ -406,6 +420,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
     _viewsChartAnimationController.dispose();
     _engagementChartAnimationController.dispose();
     _viralityScoreAnimationController.dispose();
+    _typingAnimationController.dispose();
     _trendPageController.dispose();
     _messageController.dispose();
     _chatScrollController.dispose();
@@ -686,6 +701,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                                   _viewsChartAnimationController.forward();
                                   _engagementChartAnimationController.forward();
                                   _viralityScoreAnimationController.forward();
+                                  _typingAnimationController.forward();
                                 }
                                 return SizedBox.shrink();
                               },
@@ -706,9 +722,11 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                                   _viewsChartAnimationController.reset();
                                   _engagementChartAnimationController.reset();
                                   _viralityScoreAnimationController.reset();
+                                  _typingAnimationController.reset();
                                   _viewsChartAnimationController.forward();
                                   _engagementChartAnimationController.forward();
                                   _viralityScoreAnimationController.forward();
+                                  _typingAnimationController.forward();
                                   // Reset dei messaggi della chat quando si cambia trend
                                   _chatMessages.clear();
                                 },
@@ -765,8 +783,10 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                                                 ],
                                               ),
                                               SizedBox(height: 8),
-                                              Text(
-                                                trend.description,
+                                              TypingTextWidget(
+                                                text: trend.description,
+                                                animation: _typingAnimation,
+                                                overflow: TextOverflow.visible,
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
@@ -1909,14 +1929,25 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
           ],
         ),
         SizedBox(height: 12),
-        Text(
-          content,
-          style: TextStyle(
-            fontSize: 15,
-            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
-            height: 1.6,
-          ),
-        ),
+        title == 'Description' 
+          ? TypingTextWidget(
+              text: content,
+              animation: _typingAnimation,
+              overflow: TextOverflow.visible,
+              style: TextStyle(
+                fontSize: 15,
+                color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
+                height: 1.6,
+              ),
+            )
+          : Text(
+              content,
+              style: TextStyle(
+                fontSize: 15,
+                color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
+                height: 1.6,
+              ),
+            ),
       ],
     );
   }
@@ -2591,9 +2622,11 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
             _viewsChartAnimationController.reset();
             _engagementChartAnimationController.reset();
             _viralityScoreAnimationController.reset();
+            _typingAnimationController.reset();
             _viewsChartAnimationController.forward();
             _engagementChartAnimationController.forward();
             _viralityScoreAnimationController.forward();
+            _typingAnimationController.forward();
             // Reset dei messaggi della chat quando si cambia piattaforma
             _chatMessages.clear();
           });
@@ -4840,7 +4873,43 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
     return sections;
   }
 
-} 
+}
+
+// Custom widget for typing animation effect
+class TypingTextWidget extends StatelessWidget {
+  final String text;
+  final Animation<double> animation;
+  final TextStyle? style;
+  final int? maxLines;
+  final TextOverflow overflow;
+
+  const TypingTextWidget({
+    Key? key,
+    required this.text,
+    required this.animation,
+    this.style,
+    this.maxLines,
+    this.overflow = TextOverflow.ellipsis,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final visibleLength = (text.length * animation.value).round();
+        final visibleText = text.substring(0, visibleLength.clamp(0, text.length));
+        
+        return Text(
+          visibleText,
+          style: style,
+          maxLines: maxLines,
+          overflow: overflow,
+        );
+      },
+    );
+  }
+}
 
 // Classe di supporto per le sezioni
 class AnalysisSection {

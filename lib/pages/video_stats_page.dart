@@ -1284,7 +1284,12 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
       _errorMessage = null;
     });
 
-    try {
+    // Retry mechanism per iOS
+    int retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
       // Ottieni user e videoId
       final user = FirebaseAuth.instance.currentUser;
       final videoId = widget.video['id']?.toString() ?? widget.video['key']?.toString();
@@ -1292,6 +1297,9 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
       // Prima carica le piattaforme selezionate dal database Firebase
       print('[STATS] Caricamento piattaforme selezionate...');
       await _loadPlatformsFromFirebase();
+      
+      // Aspetta un momento per assicurarsi che le piattaforme siano caricate
+      await Future.delayed(Duration(milliseconds: 100));
       
       // Carica i dati salvati dal database Firebase
       if (user != null && videoId != null) {
@@ -1422,16 +1430,26 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
         final videoOwnerId = widget.video['user_id']?.toString() ?? user?.uid;
         if (videoOwnerId != null && videoId != null) {
           final databaseRef = FirebaseDatabase.instance.ref();
-          final tkAccountsSnap = await databaseRef.child('users').child('users').child(videoOwnerId).child('videos').child(videoId).child('accounts').child('TikTok').get();
+          final tkAccountsSnap = await databaseRef.child('users').child('users').child(videoOwnerId).child('videos').child(videoId).child('accounts').child('TikTok').get().timeout(
+            Duration(seconds: 10),
+            onTimeout: () {
+              print('[STATS] Timeout nel caricamento account TikTok');
+              throw TimeoutException('Timeout nel caricamento account TikTok', Duration(seconds: 10));
+            },
+          );
           if (tkAccountsSnap.exists) {
             final raw = tkAccountsSnap.value;
             List<dynamic> tkAccounts;
             if (raw is List) {
               tkAccounts = raw;
+              print('[STATS] TikTok accounts loaded as List: ${tkAccounts.length} accounts');
             } else if (raw is Map) {
+              // iOS Firebase can return maps for arrays; collect values
               tkAccounts = raw.values.toList();
+              print('[STATS] TikTok accounts loaded as Map (iOS): ${tkAccounts.length} accounts');
             } else {
               tkAccounts = [];
+              print('[STATS] TikTok accounts: unexpected data type: ${raw.runtimeType}');
             }
             int tkIdx = 1;
             for (final account in tkAccounts) {
@@ -1549,10 +1567,14 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
               List<dynamic> ytAccounts;
               if (raw is List) {
                 ytAccounts = raw;
+                print('[STATS] YouTube accounts loaded as List: ${ytAccounts.length} accounts');
               } else if (raw is Map) {
+                // iOS Firebase can return maps for arrays; collect values
                 ytAccounts = raw.values.toList();
+                print('[STATS] YouTube accounts loaded as Map (iOS): ${ytAccounts.length} accounts');
               } else {
                 ytAccounts = [];
+                print('[STATS] YouTube accounts: unexpected data type: ${raw.runtimeType}');
               }
               int ytIdx = 1;
               for (final account in ytAccounts) {
@@ -1742,6 +1764,7 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
               if (raw is List) {
                 igAccounts = raw;
               } else if (raw is Map) {
+                // iOS Firebase can return maps for arrays; collect values
                 igAccounts = raw.values.toList();
               } else {
                 igAccounts = [];
@@ -1841,6 +1864,7 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
               if (raw is List) {
                 threadsAccounts = raw;
               } else if (raw is Map) {
+                // iOS Firebase can return maps for arrays; collect values
                 threadsAccounts = raw.values.toList();
               } else {
                 threadsAccounts = [];
@@ -1940,6 +1964,7 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
             if (raw is List) {
               fbAccounts = raw;
             } else if (raw is Map) {
+              // iOS Firebase can return maps for arrays; collect values
               fbAccounts = raw.values.toList();
             } else {
               fbAccounts = [];
@@ -2117,15 +2142,27 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
       });
       // --- AGGIUNTA: salva i totali aggregati in Firebase ---
       await _saveAggregatedStatsToFirebase();
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Errore generale nel caricamento dei dati: ${e.toString()}';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      } catch (e) {
+        retryCount++;
+        print('[STATS] Tentativo $retryCount/$maxRetries fallito: $e');
+        
+        if (retryCount < maxRetries) {
+          // Aspetta prima di riprovare (backoff esponenziale)
+          await Future.delayed(Duration(milliseconds: 1000 * retryCount));
+          continue;
+        } else {
+          // Tutti i tentativi falliti
+          setState(() {
+            _errorMessage = 'Errore nel caricamento dei dati dopo $maxRetries tentativi: ${e.toString()}';
+          });
+          break;
+        }
+      }
     }
+    
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   @override
@@ -7487,7 +7524,13 @@ These questions should be relevant to your response and help users explore relat
       // Usa l'user_id del video (nuovo formato) se presente, altrimenti fallback all'utente corrente
       final videoOwnerId = widget.video['user_id']?.toString() ?? user.uid;
       final videoRef = databaseRef.child('users').child('users').child(videoOwnerId).child('videos').child(videoId);
-        final snapshot = await videoRef.child('platforms').get();
+        final snapshot = await videoRef.child('platforms').get().timeout(
+          Duration(seconds: 10),
+          onTimeout: () {
+            print('[STATS] Timeout nel caricamento delle piattaforme');
+            throw TimeoutException('Timeout nel caricamento delle piattaforme', Duration(seconds: 10));
+          },
+        );
         
         if (snapshot.exists) {
           final dynamic raw = snapshot.value;
@@ -7589,7 +7632,21 @@ These questions should be relevant to your response and help users explore relat
         }
       }
     } catch (e) {
+      print('[STATS] Errore nel caricamento delle piattaforme: $e');
+      // In caso di errore, prova a dedurre le piattaforme dagli ID del video
+      final List<String> fallbackPlatforms = [];
+      if (widget.video['tiktok_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('tiktok');
+      if (widget.video['youtube_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('youtube');
+      if (widget.video['instagram_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('instagram');
+      if (widget.video['threads_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('threads');
+      if (widget.video['facebook_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('facebook');
+      if (widget.video['twitter_id']?.toString().isNotEmpty == true) fallbackPlatforms.add('twitter');
       
+      if (fallbackPlatforms.isNotEmpty) {
+        widget.video['platforms'] = fallbackPlatforms;
+        if (mounted) setState(() {});
+        print('[STATS] Piattaforme dedotte dagli ID: $fallbackPlatforms');
+      }
     }
   }
 

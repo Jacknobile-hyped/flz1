@@ -26,6 +26,8 @@ import 'package:lottie/lottie.dart';
 import 'dart:async';
 import '../widgets/notification_permission_dialog.dart';
 import '../services/notification_permission_service.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'dart:math';
 
 class HomePage extends StatefulWidget {
   final Map<String, dynamic>? initialArguments;
@@ -64,6 +66,20 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // Variable to track notification permission status
   bool? _pushNotificationsEnabled;
   bool _notificationDialogShown = false;
+  
+  // Variables for trends data and animations
+  List<Map<String, dynamic>> _topTrends = [];
+  late AnimationController _trendChartAnimationController;
+  late AnimationController _trendScoreAnimationController;
+  late Animation<double> _trendChartAnimation;
+  late Animation<double> _trendScoreAnimation;
+  late PageController _trendPageController;
+  int _currentTrendIndex = 0;
+  late AnimationController _typingAnimationController;
+  late Animation<double> _typingAnimation;
+  
+  // Variable to track if getting started section is expanded
+  bool _isGettingStartedExpanded = false;
 
   // Animazione per i crediti
   late AnimationController _creditsAnimationController;
@@ -236,7 +252,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       
       // Check for notification permission dialog
-      _checkNotificationPermission();
+      // _checkNotificationPermission(); // DISABLED: Notification popup disabled
     } catch (e) {
       print('Error loading user credits: $e');
     }
@@ -292,6 +308,38 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
       });
     });
     
+    // Initialize animation controllers for trends
+    _trendChartAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _trendChartAnimation = CurvedAnimation(
+      parent: _trendChartAnimationController,
+      curve: Curves.easeOutCubic,
+    );
+    
+    _trendScoreAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _trendScoreAnimation = CurvedAnimation(
+      parent: _trendScoreAnimationController,
+      curve: Curves.easeOutCubic,
+    );
+    
+    // Initialize page controller for horizontal scrolling
+    _trendPageController = PageController(viewportFraction: 0.9);
+    
+    // Initialize typing animation controller
+    _typingAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+    _typingAnimation = CurvedAnimation(
+      parent: _typingAnimationController,
+      curve: Curves.easeInOut,
+    );
+    
     // Listener per aggiornare il progresso della ruota
     _creditsAnimation.addListener(() {
       setState(() {
@@ -303,6 +351,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _loadVideos();
     loadSocialAccounts();
     _loadUpcomingScheduledPosts(); // Load upcoming scheduled posts
+    _loadTopTrends(); // Load trends data
     checkUserProgress();
     
     // Inizializza il video player per la card AI Videoclip
@@ -336,6 +385,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) {
         _loadUpcomingScheduledPosts();
+        _loadTopTrends(); // Load trends data periodically
         // Non carichiamo i crediti qui per evitare rallentamenti
       } else {
         timer.cancel();
@@ -347,6 +397,10 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void dispose() {
     _creditsAnimationController.dispose();
     _numberAnimationController.dispose();
+    _trendChartAnimationController.dispose();
+    _trendScoreAnimationController.dispose();
+    _trendPageController.dispose();
+    _typingAnimationController.dispose();
     _rewardedAd?.dispose();
     _aiVideoclipVideoController?.dispose();
     super.dispose();
@@ -1076,6 +1130,130 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _loadTopTrends() async {
+    if (!mounted) return;
+    try {
+      final DatabaseReference database = FirebaseDatabase.instance.ref();
+      final List<String> platformNodes = [
+        'TIKTOKTREND',
+        'INSTAGRAMTREND',
+        'FACEBOOKTREND',
+        'TWITTERTREND',
+        'THREADSTREND',
+        'YOUTUBETREND',
+      ];
+      
+      List<Map<String, dynamic>> allTrends = [];
+      
+      for (final node in platformNodes) {
+        final DataSnapshot snapshot = await database.child(node).get();
+        if (snapshot.exists && snapshot.value != null) {
+          final dynamic data = snapshot.value;
+          if (data is List) {
+            allTrends.addAll((data as List).map((item) {
+              if (item == null) return null;
+              if (item is Map) {
+                final trendData = item.map((key, value) => MapEntry(key.toString(), value));
+                return {
+                  'trend_name': trendData['trend_name'] ?? '',
+                  'description': trendData['description'] ?? '',
+                  'platform': node.replaceAll('TREND', '').toLowerCase(),
+                  'category': trendData['category'] ?? '',
+                  'trend_level': trendData['trend_level'] ?? '⏸',
+                  'hashtags': trendData['hashtags'] ?? [],
+                  'growth_rate': trendData['growth_rate'] ?? '',
+                  'virality_score': _parseNumericValue(trendData['virality_score']),
+                  'data_points': _parseDataPoints(trendData['data_points']),
+                };
+              }
+              return null;
+            }).whereType<Map<String, dynamic>>());
+          } else if (data is Map) {
+            final dataMap = data.map((key, value) => MapEntry(key.toString(), value));
+            allTrends.addAll(dataMap.entries.map((entry) {
+              final trendData = entry.value;
+              if (trendData == null) return null;
+              if (trendData is Map) {
+                return {
+                  'trend_name': trendData['trend_name'] ?? '',
+                  'description': trendData['description'] ?? '',
+                  'platform': node.replaceAll('TREND', '').toLowerCase(),
+                  'category': trendData['category'] ?? '',
+                  'trend_level': trendData['trend_level'] ?? '⏸',
+                  'hashtags': trendData['hashtags'] ?? [],
+                  'growth_rate': trendData['growth_rate'] ?? '',
+                  'virality_score': _parseNumericValue(trendData['virality_score']),
+                  'data_points': _parseDataPoints(trendData['data_points']),
+                };
+              }
+              return null;
+            }).whereType<Map<String, dynamic>>());
+          }
+        }
+      }
+      
+      // Ordina i trend per virality_score e growth_rate, poi per trend_level
+      allTrends.sort((a, b) {
+        // Prima per trend_level (🔺 prima di ⏸)
+        if (a['trend_level'] == '🔺' && b['trend_level'] != '🔺') return -1;
+        if (a['trend_level'] != '🔺' && b['trend_level'] == '🔺') return 1;
+        
+        // Poi per virality_score
+        final aScore = a['virality_score'] as num? ?? 0.0;
+        final bScore = b['virality_score'] as num? ?? 0.0;
+        return bScore.compareTo(aScore);
+      });
+      
+      // Prendi solo i top 3 trend
+      final topTrends = allTrends.take(3).toList();
+      
+      if (mounted) {
+        setState(() {
+          _topTrends = topTrends;
+        });
+        // Start animations after data is loaded
+        _trendChartAnimationController.reset();
+        _trendScoreAnimationController.reset();
+        _typingAnimationController.reset();
+        _trendChartAnimationController.forward();
+        _trendScoreAnimationController.forward();
+        _typingAnimationController.forward();
+      }
+    } catch (e) {
+      print('Error loading top trends: $e');
+      if (mounted) {
+        setState(() {
+          _topTrends = [];
+        });
+      }
+    }
+  }
+
+  double _parseNumericValue(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(value) ?? 0.0;
+    }
+    return 0.0;
+  }
+
+  List<Map<String, dynamic>> _parseDataPoints(dynamic dataPoints) {
+    if (dataPoints == null) return [];
+    
+    if (dataPoints is List) {
+      return dataPoints.map((point) {
+        if (point == null) return <String, dynamic>{};
+        if (point is Map) {
+          return point.map((k, v) => MapEntry(k.toString(), v));
+        }
+        return <String, dynamic>{};
+      }).where((point) => point.isNotEmpty).toList();
+    }
+    
+    return [];
+  }
+
   String _formatTimestamp(DateTime timestamp) {
     final difference = DateTime.now().difference(timestamp);
     if (difference.inDays > 0) {
@@ -1210,6 +1388,13 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
             
+            // Getting Started Floating Button
+            Positioned(
+              bottom: 95, // Spostato 15 pixel più in basso (da 110 a 95)
+              right: 20,
+              child: _buildGettingStartedFloatingButton(theme),
+            ),
+            
 
           ],
         ),
@@ -1229,7 +1414,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20.0, 0.0, 20.0, 20.0), // Padding superiore rimosso per ridurre lo spazio
+          padding: const EdgeInsets.fromLTRB(16.0, 0.0, 16.0, 16.0), // Padding aumentato per distanziare le card dai bordi
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               // Upcoming scheduled posts section
@@ -1248,11 +1433,10 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
               // Spacing between credits and getting started sections
               const SizedBox(height: 16),
               
-              // Getting started section - don't need title here since it's in the onboarding widget
-              _buildOnboardingList(theme),
+              // Getting started section removed - now shown as dropdown
               
               // Add bottom padding for better scrolling experience
-              const SizedBox(height: 116), // Aumentato di 2 cm (76px)
+              const SizedBox(height: 30), // Ridotto significativamente
             ]),
           ),
         ),
@@ -1272,10 +1456,11 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20.0, 0.0, 20.0, 20.0),
+          padding: const EdgeInsets.fromLTRB(16.0, 0.0, 16.0, 16.0),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               _buildUpcomingScheduledPosts(theme),
+              
               // CARD AI VIDEOCLIP: DISABILITATA
               // const SizedBox(height: 18),
               // _buildAiVideoclipCard(theme),
@@ -1287,8 +1472,8 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
               _buildCommunityCard(theme),
               
               const SizedBox(height: 16),
-              _buildOnboardingList(theme),
-              const SizedBox(height: 116), // Aumentato di 2 cm (76px)
+              // Getting started section removed - now shown as dropdown
+              const SizedBox(height: 60), // Ridotto significativamente
             ]),
           ),
         ),
@@ -1557,8 +1742,8 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
             context,
             MaterialPageRoute(
               builder: (context) => Platform.isIOS
-                  ? const UpgradePremiumIOSPage(suppressExtraPadding: true)
-                  : const UpgradePremiumPage(suppressExtraPadding: true),
+                  ? const UpgradePremiumIOSPage(suppressExtraPadding: true, fromGettingStarted: true)
+                  : const UpgradePremiumPage(suppressExtraPadding: true, fromGettingStarted: true),
             ),
           ).then((_) {
             // Check progress when returning, ma non ricarichiamo i crediti
@@ -1721,76 +1906,463 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ],
         ),
       ),
-      padding: const EdgeInsets.all(20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return LinearGradient(
-                    colors: [
-                      Color(0xFF667eea),
-                      Color(0xFF764ba2),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180),
-                  ).createShader(bounds);
-                },
-                child: Text(
-                  'Getting Started',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+          // Header cliccabile per espandere/chiudere
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                setState(() {
+                  _isGettingStartedExpanded = !_isGettingStartedExpanded;
+                });
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea),
+                            Color(0xFF764ba2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'Getting Started',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Color(0xFF667eea).withOpacity(0.1),
+                                Color(0xFF764ba2).withOpacity(0.1),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              transform: GradientRotation(135 * 3.14159 / 180),
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: ShaderMask(
+                            shaderCallback: (Rect bounds) {
+                              return LinearGradient(
+                                colors: [
+                                  Color(0xFF667eea),
+                                  Color(0xFF764ba2),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                transform: GradientRotation(135 * 3.14159 / 180),
+                              ).createShader(bounds);
+                            },
+                            child: Text(
+                              '$completedSteps/$totalSteps Steps',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        AnimatedRotation(
+                          turns: _isGettingStartedExpanded ? 0.5 : 0.0,
+                          duration: const Duration(milliseconds: 200),
+                          child: ShaderMask(
+                            shaderCallback: (Rect bounds) {
+                              return LinearGradient(
+                                colors: [
+                                  Color(0xFF667eea),
+                                  Color(0xFF764ba2),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                transform: GradientRotation(135 * 3.14159 / 180),
+                              ).createShader(bounds);
+                            },
+                            child: Icon(
+                              Icons.keyboard_arrow_down,
+                              color: Colors.white,
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
+            ),
+          ),
+          // Contenuto espandibile
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 300),
+            crossFadeState: _isGettingStartedExpanded 
+                ? CrossFadeState.showSecond 
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 20),
+                  // Add all the step widgets
+                  ...stepWidgets,
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Floating button for Getting Started
+  Widget _buildGettingStartedFloatingButton(ThemeData theme) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF667eea),
+            Color(0xFF764ba2),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          transform: GradientRotation(135 * 3.14159 / 180),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF667eea).withOpacity(0.3),
+            blurRadius: 12,
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () {
+            _showGettingStartedBottomSheet();
+          },
+          child: Center(
+            child: Icon(
+              Icons.lightbulb_outline,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Show Getting Started bottom sheet
+  void _showGettingStartedBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.75, // Ridotto dal 85% al 75% (10% in meno)
+          decoration: BoxDecoration(
+            color: theme.brightness == Brightness.dark ? Colors.grey[900]! : Colors.white,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(25),
+              topRight: Radius.circular(25),
+            ),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
               Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                margin: const EdgeInsets.only(top: 12, bottom: 16),
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF667eea).withOpacity(0.1),
-                      Color(0xFF764ba2).withOpacity(0.1),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180),
-                  ),
-                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.grey[400],
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                child: ShaderMask(
-                  shaderCallback: (Rect bounds) {
-                    return LinearGradient(
-                      colors: [
-                        Color(0xFF667eea),
-                        Color(0xFF764ba2),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      transform: GradientRotation(135 * 3.14159 / 180),
-                    ).createShader(bounds);
-                  },
-                  child: Text(
-                    '$completedSteps/$totalSteps Steps',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return const LinearGradient(
+                          colors: [
+                            Color(0xFF667eea),
+                            Color(0xFF764ba2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'Getting Started',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
-                  ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF667eea).withOpacity(0.1),
+                            const Color(0xFF764ba2).withOpacity(0.1),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: const GradientRotation(135 * 3.14159 / 180),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: ShaderMask(
+                        shaderCallback: (Rect bounds) {
+                          return const LinearGradient(
+                            colors: [
+                              Color(0xFF667eea),
+                              Color(0xFF764ba2),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            transform: GradientRotation(135 * 3.14159 / 180),
+                          ).createShader(bounds);
+                        },
+                        child: Text(
+                          '${_getCompletedStepsCount()}/${_getTotalStepsCount()} Steps',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Content
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _buildOnboardingStepsContent(theme),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          // Add all the step widgets
-          ...stepWidgets,
-        ],
+        );
+      },
+    );
+  }
+
+  // Helper method to get completed steps count
+  int _getCompletedStepsCount() {
+    int count = 0;
+    if (_hasConnectedAccounts) count++;
+    if (_hasUploadedVideo) count++;
+    if (_hasCompletedProfile) count++;
+    return count;
+  }
+
+  // Helper method to get total steps count
+  int _getTotalStepsCount() {
+    return 3;
+  }
+
+  // Content for the onboarding steps (extracted from the original method)
+  Widget _buildOnboardingStepsContent(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    
+    // Define the steps with their data
+    final List<Map<String, dynamic>> steps = [
+      {
+        'number': 1,
+        'title': 'Connect Your Social Accounts',
+        'description': 'Link your social media accounts to start sharing content',
+        'isCompleted': _hasConnectedAccounts,
+        'onTap': () {
+          Navigator.pushNamed(context, '/accounts').then((_) {
+            loadSocialAccounts();
+            checkUserProgress();
+          });
+        },
+        'key': _connectAccountsKey,
+        'icon': Icons.link,
+      },
+      {
+        'number': 2,
+        'title': 'Upload Your First Video',
+        'description': 'Create and share your first video across your connected platforms',
+        'isCompleted': _hasUploadedVideo,
+        'onTap': () {
+          NavigationService.navigateToUpload(context);
+          _loadVideos();
+          checkUserProgress();
+        },
+        'key': _uploadVideoKey,
+        'icon': Icons.video_library,
+      },
+      {
+        'number': 3,
+        'title': _hasCompletedProfile ? 'Premium Active' : 'Unlock the full potential',
+        'description': _hasCompletedProfile ? 
+            'Enjoy unlimited uploads and premium features' : 
+            'Upgrade to take your social media experience to the max with Fluzar',
+        'isCompleted': _hasCompletedProfile,
+        'onTap': () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Platform.isIOS
+                  ? const UpgradePremiumIOSPage(suppressExtraPadding: true, fromGettingStarted: true)
+                  : const UpgradePremiumPage(suppressExtraPadding: true, fromGettingStarted: true),
+            ),
+          ).then((_) {
+            checkUserProgress();
+          });
+        },
+        'key': null,
+        'icon': Icons.star,
+      },
+    ];
+
+    // Calculate current progress
+    int completedSteps = steps.where((step) => step['isCompleted'] as bool).length;
+    int totalSteps = steps.length;
+    int currentStep = completedSteps < totalSteps ? completedSteps + 1 : totalSteps;
+    
+    // Build the step widgets
+    List<Widget> stepWidgets = [];
+    
+    // Add a top decoration for the first step
+    stepWidgets.add(
+      Container(
+        margin: const EdgeInsets.only(left: 22.5),
+        width: 3,
+        height: 15,
+        decoration: BoxDecoration(
+          gradient: steps[0]['isCompleted'] as bool 
+              ? const LinearGradient(
+                  colors: [
+                    Color(0xFF667eea),
+                    Color(0xFF764ba2),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  transform: GradientRotation(135 * 3.14159 / 180),
+                )
+              : null,
+          color: steps[0]['isCompleted'] as bool ? null : Colors.grey.shade300,
+        ),
       ),
+    );
+    
+    for (int i = 0; i < steps.length; i++) {
+      final step = steps[i];
+      final isActive = (i + 1) <= currentStep;
+      final isCompleted = step['isCompleted'] as bool;
+      
+      // Add the step item
+      stepWidgets.add(
+        _buildStepItem(
+          theme,
+          number: step['number'] as int,
+          title: step['title'] as String,
+          description: step['description'] as String,
+          isActive: isActive,
+          isCompleted: isCompleted,
+          icon: step['icon'] as IconData,
+          onTap: step['onTap'] as VoidCallback,
+          key: step['key'] as Key?,
+        ),
+      );
+      
+      // Add connecting line (don't show after last item)
+      if (i < steps.length - 1) {
+        stepWidgets.add(
+          Container(
+            margin: const EdgeInsets.only(left: 22.5),
+            width: 3,
+            height: 30,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  isCompleted 
+                      ? const Color(0xFF667eea)
+                      : Colors.grey.shade300,
+                  i + 1 < currentStep 
+                      ? const Color(0xFF764ba2)
+                      : Colors.grey.shade300,
+                ],
+                transform: const GradientRotation(135 * 3.14159 / 180),
+              ),
+            ),
+          ),
+        );
+      } else {
+        // For the last item, add a bottom decoration to complete the visual
+        stepWidgets.add(
+          Container(
+            margin: const EdgeInsets.only(left: 22.5),
+            width: 3,
+            height: 15,
+            decoration: BoxDecoration(
+              gradient: isCompleted 
+                  ? const LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    )
+                  : null,
+              color: isCompleted ? null : Colors.grey.shade300,
+            ),
+          ),
+        );
+      }
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: stepWidgets,
     );
   }
 
@@ -2412,7 +2984,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 color: theme.textTheme.bodyMedium?.color,
               ),
               textAlign: TextAlign.center,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -3396,7 +3968,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   // Card per navigare alla pagina dei trend social
-    Widget _buildTrendsCard(ThemeData theme) {
+  Widget _buildTrendsCard(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     return Material(
       color: Colors.transparent,
@@ -3412,7 +3984,7 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
         },
         borderRadius: BorderRadius.circular(24),
         child: Container(
-          margin: const EdgeInsets.only(top: 8, bottom: 10),
+          margin: const EdgeInsets.only(top: 2, bottom: 10),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             // Effetto vetro semi-trasparente opaco
@@ -3462,141 +4034,643 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ],
             ),
           ),
-          child: Stack(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // Header con icona e titolo
+              Row(
                 children: [
-                  // Header con icona e titolo
-                  Row(
-                    children: [
-                      // Icona AI senza container circolare
-                      Lottie.asset(
-                        'assets/animations/analizeAI.json',
-                        width: 64,
-                        height: 64,
-                        fit: BoxFit.cover,
-                      ),
-                      const SizedBox(width: 8),
-                      
-                      // Titolo
-                      Expanded(
-                        child: ShaderMask(
-                          shaderCallback: (Rect bounds) {
-                            return LinearGradient(
-                              colors: [
-                                Color(0xFF667eea), // Blu violaceo al 0%
-                                Color(0xFF764ba2), // Viola al 100%
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              transform: GradientRotation(135 * 3.14159 / 180),
-                            ).createShader(bounds);
-                          },
-                          child: Text(
-                            'AI-Trends Finder',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              fontSize: 16,
-                              letterSpacing: -0.5,
-                              fontFamily: 'Ethnocentric',
-                            ),
-                          ),
+                  // Icona AI senza container circolare
+                  Lottie.asset(
+                    'assets/animations/analizeAI.json',
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.cover,
+                  ),
+                  const SizedBox(width: 8),
+                  
+                  // Titolo
+                  Expanded(
+                    child: ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea), // Blu violaceo al 0%
+                            Color(0xFF764ba2), // Viola al 100%
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'AI-Trends Finder',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          fontSize: 16,
+                          letterSpacing: -0.5,
+                          fontFamily: 'Ethnocentric',
                         ),
                       ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // Descrizione migliorata
-                  Text(
-                    'Discover trending content across TikTok, Instagram, YouTube & more with real-time AI analysis',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: isDark 
-                          ? Colors.white.withOpacity(0.7)
-                          : Color(0xFF1A1A1A).withOpacity(0.7),
-                      height: 1.4,
-                      fontWeight: FontWeight.w400,
                     ),
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // Footer con feature e freccia
-                  Row(
-                    children: [
-                      // Feature badge con gradiente
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Color(0xFF667eea),
-                              Color(0xFF764ba2),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            transform: GradientRotation(135 * 3.14159 / 180),
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Color(0xFF667eea).withOpacity(0.3),
-                              blurRadius: 8,
-                              spreadRadius: 0,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.auto_awesome,
-                              size: 14,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Real-time AI',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      const Spacer(),
-                      
-                      // Freccia più elegante
-                      Padding(
-                        padding: const EdgeInsets.only(right: 20),
-                        child: Icon(
-                          Icons.arrow_forward_ios,
-                          color: isDark 
-                              ? Colors.white.withOpacity(0.7)
-                              : Color(0xFF1A1A1A).withOpacity(0.6),
-                          size: 16,
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
               
-
+              const SizedBox(height: 20),
+              
+              // Descrizione (PARTE ALTA - COME PRIMA)
+              Text(
+                'Discover trending content across TikTok, Instagram, YouTube & more with real-time AI analysis',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.7)
+                      : Color(0xFF1A1A1A).withOpacity(0.7),
+                  height: 1.4,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // NUOVA SEZIONE: Top Trends scorrevoli orizzontalmente
+              if (_topTrends.isNotEmpty) ...[
+                Row(
+                  children: [
+                    Text(
+                      'Top Trends',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark 
+                            ? Colors.white.withOpacity(0.9)
+                            : Color(0xFF1A1A1A).withOpacity(0.9),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_topTrends.length} trends',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark 
+                            ? Colors.white.withOpacity(0.6)
+                            : Color(0xFF1A1A1A).withOpacity(0.6),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 12),
+                
+                // Scroll orizzontale dei trend (come trends_page.dart)
+                SizedBox(
+                  height: 320, // Aumentata ulteriormente per il grafico
+                  child: PageView.builder(
+                    controller: _trendPageController,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentTrendIndex = index;
+                      });
+                      // Start animations when scrolling between trends
+                      _trendChartAnimationController.reset();
+                      _trendScoreAnimationController.reset();
+                      _typingAnimationController.reset();
+                      _trendChartAnimationController.forward();
+                      _trendScoreAnimationController.forward();
+                      _typingAnimationController.forward();
+                    },
+                    itemCount: _topTrends.length,
+                    itemBuilder: (context, index) {
+                      final trend = _topTrends[index];
+                      return Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        child: _buildTrendCard(theme, trend, isDark, index),
+                      );
+                    },
+                  ),
+                ),
+                
+                const SizedBox(height: 16),
+              ] else ...[
+                // Loading state or empty state
+                Container(
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.05)
+                        : Colors.black.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Lottie.asset(
+                          'assets/animations/MainScene.json',
+                          width: 200,
+                          height: 200,
+                          fit: BoxFit.contain,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              
+              // Footer con feature e freccia (PARTE BASSA - COME PRIMA)
+              Row(
+                children: [
+                  // Feature badge con gradiente
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF667eea),
+                          Color(0xFF764ba2),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        transform: GradientRotation(135 * 3.14159 / 180),
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0xFF667eea).withOpacity(0.3),
+                          blurRadius: 8,
+                          spreadRadius: 0,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Real-time AI',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const Spacer(),
+                  
+                  // Freccia con gradiente viola allineata con community card
+                  const SizedBox(width: 8),
+                  ShaderMask(
+                    shaderCallback: (Rect bounds) {
+                      return LinearGradient(
+                        colors: [
+                          const Color(0xFF667eea),
+                          const Color(0xFF764ba2),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ).createShader(bounds);
+                    },
+                    child: Icon(
+                      Icons.arrow_forward_ios,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
     );
   }
+
+  Widget _buildTrendCard(ThemeData theme, Map<String, dynamic> trend, bool isDark, int index) {
+    final platform = trend['platform'] as String;
+    final trendName = trend['trend_name'] as String;
+    final description = trend['description'] as String;
+    final viralityScore = trend['virality_score'] as num? ?? 0.0;
+    final growthRate = trend['growth_rate'] as String? ?? '';
+    final trendLevel = trend['trend_level'] as String? ?? '⏸';
+    final category = trend['category'] as String? ?? '';
+    final hashtags = trend['hashtags'] as List<dynamic>? ?? [];
+    final dataPoints = trend['data_points'] as List<dynamic>? ?? [];
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark 
+            ? Color(0xFF1E1E1E)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark 
+              ? Colors.white.withOpacity(0.1)
+              : Colors.grey.withOpacity(0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark 
+                ? Colors.black.withOpacity(0.3)
+                : Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with platform logo and trend level
+            Row(
+              children: [
+                // Platform logo
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _getPlatformColorForTrend(platform).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: _getPlatformLogo(platform),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    platform.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _getPlatformColorForTrend(platform),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Trend name
+            Text(
+              trendName,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: isDark 
+                    ? Colors.white
+                    : Colors.black,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            
+            const SizedBox(height: 6),
+            
+            // Description with typing animation
+            if (description.isNotEmpty)
+              TypingTextWidget(
+                text: description,
+                animation: _typingAnimation,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.7)
+                      : Colors.black.withOpacity(0.7),
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            
+            const SizedBox(height: 12),
+            
+            // Engagement rate chart (minimal, senza scritte)
+            if (dataPoints.isNotEmpty)
+              Container(
+                height: 100,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.black.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: _buildEngagementChart(dataPoints, isDark),
+                ),
+              ),
+            
+            const SizedBox(height: 12),
+            
+            // Stats row - compact design like premium version
+            Row(
+              children: [
+                Expanded(
+                  child: _buildCompactStatItem(
+                    'Score',
+                    '${viralityScore.toStringAsFixed(0)}',
+                    Icons.trending_up,
+                    isDark,
+                    targetScore: viralityScore.toDouble(),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildCompactStatItem(
+                    'Growth',
+                    growthRate.isNotEmpty ? _cleanGrowthRate(growthRate) : '0%',
+                    Icons.speed,
+                    isDark,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildCompactStatItem(
+                    'Viral',
+                    _getViralPosition(index),
+                    Icons.whatshot,
+                    isDark,
+                  ),
+                ),
+              ],
+            ),
+            
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEngagementChart(List<dynamic> dataPoints, bool isDark) {
+    if (dataPoints.isEmpty) return const SizedBox.shrink();
+    
+    // Estrai i valori di engagement rate dai dataPoints
+    List<double> engagementValues = [];
+    for (var point in dataPoints) {
+      if (point is Map && point['engagement_rate'] != null) {
+        engagementValues.add((point['engagement_rate'] as num).toDouble());
+      }
+    }
+    
+    if (engagementValues.isEmpty) return const SizedBox.shrink();
+    
+    // Calcolo il massimo e minimo per lo scaling
+    final maxValue = engagementValues.reduce(max);
+    final minValue = engagementValues.reduce(min);
+    final range = maxValue - minValue;
+    
+    return AnimatedBuilder(
+      animation: _trendChartAnimation,
+      builder: (context, child) {
+        return LineChart(
+          LineChartData(
+            gridData: FlGridData(show: false),
+            titlesData: FlTitlesData(show: false),
+            borderData: FlBorderData(show: false),
+            lineTouchData: LineTouchData(
+              enabled: false,
+            ),
+            lineBarsData: [
+              LineChartBarData(
+                spots: engagementValues.asMap().entries.map((e) {
+                  final x = e.key.toDouble();
+                  final y = range > 0 ? ((e.value - minValue) / range * 80).toDouble() : 40.0;
+                  return FlSpot(x, y * _trendChartAnimation.value);
+                }).toList(),
+                isCurved: true,
+                color: const Color(0xFF667eea),
+                barWidth: 3,
+                isStrokeCapRound: true,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, barData, index) {
+                    return FlDotCirclePainter(
+                      radius: 3,
+                      color: const Color(0xFF667eea),
+                      strokeWidth: 2,
+                      strokeColor: Colors.white,
+                    );
+                  },
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  color: const Color(0xFF667eea).withOpacity(0.1 * _trendChartAnimation.value),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _getPlatformLogo(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'tiktok':
+        return Image.asset(
+          'assets/loghi/logo_tiktok.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.music_note,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'youtube':
+        return Image.asset(
+          'assets/loghi/logo_yt.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.play_arrow,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'instagram':
+        return Image.asset(
+          'assets/loghi/logo_insta.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.camera_alt,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'facebook':
+        return Image.asset(
+          'assets/loghi/logo_facebook.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.facebook,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'twitter':
+        return Image.asset(
+          'assets/loghi/logo_twitter.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.chat,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      case 'threads':
+        return Image.asset(
+          'assets/loghi/threads_logo.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.chat_outlined,
+              size: 20,
+              color: _getPlatformColorForTrend(platform),
+            );
+          },
+        );
+      default:
+        return Icon(
+          Icons.share,
+          size: 16,
+          color: _getPlatformColorForTrend(platform),
+        );
+    }
+  }
+
+  Color _getPlatformColorForTrend(String platform) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    switch (platform.toLowerCase()) {
+      case 'tiktok':
+        return isDark ? Colors.white : const Color(0xFF000000);
+      case 'youtube':
+        return const Color(0xFFFF0000);
+      case 'instagram':
+        return const Color(0xFFE4405F);
+      case 'facebook':
+        return const Color(0xFF1877F2);
+      case 'twitter':
+        return const Color(0xFF1DA1F2);
+      case 'threads':
+        return isDark ? Colors.white : const Color(0xFF000000);
+      default:
+        return isDark ? Colors.white : Colors.grey;
+    }
+  }
+
+  Widget _buildCompactStatItem(String label, String value, IconData icon, bool isDark, {double? targetScore}) {
+    return AnimatedBuilder(
+      animation: _trendScoreAnimation,
+      builder: (context, child) {
+        // Use jackpot-style animation for score, regular value for others
+        String displayValue = value;
+        if (label == 'Score' && targetScore != null) {
+          displayValue = (targetScore * _trendScoreAnimation.value).toStringAsFixed(0);
+        }
+        
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+          decoration: BoxDecoration(
+            color: isDark 
+                ? Colors.white.withOpacity(0.05)
+                : Colors.black.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                size: 12,
+                color: isDark 
+                    ? Colors.white.withOpacity(0.7)
+                    : Colors.black.withOpacity(0.7),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                displayValue,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.9)
+                      : Colors.black.withOpacity(0.9),
+                ),
+              ),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 7,
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.6)
+                      : Colors.black.withOpacity(0.6),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _cleanGrowthRate(String growthRate) {
+    // Rimuovi "last week" e altri testi indesiderati in modo più aggressivo
+    String cleaned = growthRate
+        .replaceAll('last week', '')
+        .replaceAll('Last week', '')
+        .replaceAll('LAST WEEK', '')
+        .replaceAll('(last week)', '')
+        .replaceAll('(Last week)', '')
+        .replaceAll('(LAST WEEK)', '')
+        .replaceAll('()', '') // Rimuovi parentesi vuote
+        .replaceAll('( )', '') // Rimuovi parentesi con spazio
+        .trim();
+    
+    // Se è vuoto dopo la pulizia, restituisci 0%
+    if (cleaned.isEmpty) {
+      return '0%';
+    }
+    
+    return cleaned;
+  }
+
+  String _getViralPosition(int index) {
+    switch (index) {
+      case 0:
+        return '1°';
+      case 1:
+        return '2°';
+      case 2:
+        return '3°';
+      default:
+        return '${index + 1}°';
+    }
+  }
+
 
   // Card per navigare alla pagina AI Videoclip
   Widget _buildAiVideoclipCard(ThemeData theme) {
@@ -4419,6 +5493,97 @@ class _UpgradePopupDialogState extends State<_UpgradePopupDialog> with TickerPro
       aspectRatio: _controller!.value.aspectRatio,
       child: VideoPlayer(_controller!),
     );
+  }
+}
+
+class TypingTextWidget extends StatelessWidget {
+  final String text;
+  final Animation<double> animation;
+  final TextStyle? style;
+  final int maxLines;
+  final TextOverflow overflow;
+
+  const TypingTextWidget({
+    Key? key,
+    required this.text,
+    required this.animation,
+    this.style,
+    this.maxLines = 2,
+    this.overflow = TextOverflow.ellipsis,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final visibleLength = (text.length * animation.value).round();
+        final visibleText = text.substring(0, visibleLength.clamp(0, text.length));
+        
+        return Text(
+          visibleText,
+          style: style,
+          maxLines: maxLines,
+          overflow: overflow,
+        );
+      },
+    );
+  }
+}
+
+// Custom painter for gradient circular progress indicator
+class GradientCircularProgressPainter extends CustomPainter {
+  final double progress;
+  final double strokeWidth;
+  final Color backgroundColor;
+  final LinearGradient gradient;
+
+  GradientCircularProgressPainter({
+    required this.progress,
+    required this.strokeWidth,
+    required this.backgroundColor,
+    required this.gradient,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - strokeWidth) / 2;
+
+    // Draw background circle
+    final backgroundPaint = Paint()
+      ..color = backgroundColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, backgroundPaint);
+
+    // Draw progress arc with gradient
+    final progressPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    // Create gradient shader
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final shader = gradient.createShader(rect);
+    progressPaint.shader = shader;
+
+    // Draw the progress arc
+    final sweepAngle = 2 * 3.14159 * progress;
+    canvas.drawArc(
+      rect,
+      -3.14159 / 2, // Start from top
+      sweepAngle,
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true;
   }
 }
 

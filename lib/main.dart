@@ -213,11 +213,11 @@ class MyApp extends StatelessWidget {
     // Imposta la status bar e navigation bar in base al tema
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       // Status bar (zona con batteria, orario, connessione)
-      statusBarColor: isDark ? const Color(0xFF121212) : Colors.white,
-      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
-      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
+      statusBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS - controlla il colore del testo
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android - controlla il colore delle icone
       // Navigation bar (zona menu in basso per Android) e home indicator iOS
-      systemNavigationBarColor: isDark ? const Color(0xFF121212) : Colors.white,
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ));
@@ -2112,11 +2112,11 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
     // Configura la system UI per la pagina di login/signup
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       // Status bar (zona con batteria, orario, connessione)
-      statusBarColor: Colors.transparent,
+      statusBarColor: Platform.isIOS ? Colors.transparent : Colors.transparent, // Trasparente per entrambe le piattaforme
       statusBarBrightness: Brightness.dark, // iOS - sfondo scuro quindi icone chiare
       statusBarIconBrightness: Brightness.light, // Android - icone bianche
       // Navigation bar e home indicator (iOS)
-      systemNavigationBarColor: Colors.transparent, // Trasparente per iOS home indicator
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ));
@@ -3219,11 +3219,11 @@ class _MainScreenState extends State<MainScreen> {
     // Aggiorna la status bar e navigation bar in base al tema corrente
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       // Status bar (zona con batteria, orario, connessione)
-      statusBarColor: isDark ? const Color(0xFF121212) : Colors.white,
-      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
-      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
+      statusBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS - controlla il colore del testo
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android - controlla il colore delle icone
       // Navigation bar (zona menu in basso per Android) e home indicator iOS
-      systemNavigationBarColor: isDark ? const Color(0xFF121212) : Colors.white,
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ));
@@ -3521,7 +3521,7 @@ class _MainScreenState extends State<MainScreen> {
     return Container(
       margin: EdgeInsets.symmetric(
         horizontal: 20, 
-        vertical: Platform.isIOS ? 23 : 16, // 28 - 5 = 23 per iOS (2mm più in alto)
+        vertical: Platform.isIOS ? 40 : 16, // 28 - 5 = 23 per iOS (2mm più in alto)
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(

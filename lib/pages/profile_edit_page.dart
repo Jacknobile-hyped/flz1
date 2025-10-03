@@ -8220,14 +8220,17 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                 Map<dynamic, dynamic>? commentsData;
                 if (rawComments is Map) {
                   commentsData = rawComments;
+                  print('[COMMENTS] Loaded as Map: ${commentsData.length} comments');
                 } else if (rawComments is List) {
-                  // Converte una lista in mappa con indice come chiave
+                  // iOS Firebase can return lists for arrays; convert to map with index as key
                   commentsData = {
                     for (int i = 0; i < rawComments.length; i++)
                       if (rawComments[i] != null) i.toString(): rawComments[i]
                   };
+                  print('[COMMENTS] Loaded as List (iOS): ${commentsData.length} comments');
                 } else {
                   commentsData = null;
+                  print('[COMMENTS] Unexpected data type: ${rawComments.runtimeType}');
                 }
                 if (commentsData == null || commentsData.isEmpty) {
                   return Center(
@@ -8729,8 +8732,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         'star_users': {}, // Inizializza la lista degli utenti che hanno messo stella
       };
       
-      // Salva il commento nel database
-      await commentRef.set(commentData);
+      // Salva il commento nel database con timeout per iOS
+      await commentRef.set(commentData).timeout(
+        Duration(seconds: 10),
+        onTimeout: () {
+          print('[COMMENT] Timeout nel salvataggio del commento');
+          throw TimeoutException('Timeout nel salvataggio del commento', Duration(seconds: 10));
+        },
+      );
       
       // Aggiorna la cache del conteggio commenti
       final cacheKey = '${videoUserId}_$videoId';
@@ -9211,8 +9220,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         'star_users': {}, // Inizializza la lista degli utenti che hanno messo stella
       };
       
-      // Salva la risposta nel database
-      await replyRef.set(replyData);
+      // Salva la risposta nel database con timeout per iOS
+      await replyRef.set(replyData).timeout(
+        Duration(seconds: 10),
+        onTimeout: () {
+          print('[REPLY] Timeout nel salvataggio della reply');
+          throw TimeoutException('Timeout nel salvataggio della reply', Duration(seconds: 10));
+        },
+      );
       
       // Aggiorna il conteggio delle risposte nel commento padre
       final parentCommentRef = _database
@@ -9529,7 +9544,23 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     );
                   }
                   
-                  final repliesData = snapshot.data!.snapshot.value as Map<dynamic, dynamic>?;
+                  final dynamic rawReplies = snapshot.data!.snapshot.value;
+                  Map<dynamic, dynamic>? repliesData;
+                  if (rawReplies is Map) {
+                    repliesData = rawReplies;
+                    print('[REPLIES] Loaded as Map: ${repliesData.length} replies');
+                  } else if (rawReplies is List) {
+                    // iOS Firebase can return lists for arrays; convert to map with index as key
+                    repliesData = {
+                      for (int i = 0; i < rawReplies.length; i++)
+                        if (rawReplies[i] != null) i.toString(): rawReplies[i]
+                    };
+                    print('[REPLIES] Loaded as List (iOS): ${repliesData.length} replies');
+                  } else {
+                    repliesData = null;
+                    print('[REPLIES] Unexpected data type: ${rawReplies.runtimeType}');
+                  }
+                  
                   if (repliesData == null || repliesData.isEmpty) {
                     return Container(
                       padding: EdgeInsets.symmetric(horizontal: 20),

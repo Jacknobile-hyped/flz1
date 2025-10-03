@@ -992,8 +992,8 @@ class _CreditsPageState extends State<CreditsPage> with TickerProviderStateMixin
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => Platform.isIOS
-                                          ? const UpgradePremiumIOSPage(suppressExtraPadding: true)
-                                          : const UpgradePremiumPage(suppressExtraPadding: true),
+                                          ? const UpgradePremiumIOSPage(suppressExtraPadding: true, fromGettingStarted: true)
+                                          : const UpgradePremiumPage(suppressExtraPadding: true, fromGettingStarted: true),
                                     ),
                                   ).then((_) => _loadUserCredits());
                                 },
