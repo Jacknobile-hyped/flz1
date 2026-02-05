@@ -153,6 +153,9 @@ class ProgressSegment {
 
 class InstagramUploadPage extends StatefulWidget {
   final File mediaFile;
+  // Nuove liste per supportare più media (carosello)
+  final List<File>? mediaFiles;
+  final List<bool>? isImageFiles;
   final String title;
   final String description;
   final bool isImageFile;
@@ -163,10 +166,13 @@ class InstagramUploadPage extends StatefulWidget {
   final String? draftId; // Add draft ID parameter
   final File? youtubeThumbnailFile; // Per la miniatura personalizzata di YouTube
   final Map<String, Map<String, dynamic>>? tiktokOptions; // Opzioni TikTok per ogni account
+  final Map<String, Map<String, dynamic>>? youtubeOptions; // Opzioni YouTube per ogni account
 
   const InstagramUploadPage({
     Key? key,
     required this.mediaFile,
+    this.mediaFiles,
+    this.isImageFiles,
     required this.title,
     required this.description,
     required this.selectedAccounts,
@@ -177,6 +183,7 @@ class InstagramUploadPage extends StatefulWidget {
     this.draftId, // Add draft ID parameter
     this.youtubeThumbnailFile, // Per la miniatura personalizzata di YouTube
     this.tiktokOptions, // Opzioni TikTok per ogni account
+    this.youtubeOptions, // Opzioni YouTube per ogni account
   }) : super(key: key);
 
   @override
@@ -185,15 +192,21 @@ class InstagramUploadPage extends StatefulWidget {
 
 class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerProviderStateMixin {
   bool _isUploading = false;
-  String _statusMessage = 'Preparando upload...';
+  String _statusMessage = 'Preparing upload...';
   double _uploadProgress = 0.0;
   String? _cloudflareUrl;
+  // Nuova lista di URL Cloudflare per supportare più media
+  List<String> _cloudflareUrls = [];
   String? _errorMessage;
   bool _uploadComplete = false;
   
   // Thumbnail variables
   String? _thumbnailPath;
   String? _thumbnailCloudflareUrl;
+
+  // Liste locali di media e flag immagine per gestire il carosello
+  List<File> _mediaFiles = [];
+  List<bool> _isImageFiles = [];
   
   // Progress tracking per account
   Map<String, double> _accountProgress = {};
@@ -294,6 +307,22 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
   @override
   void initState() {
     super.initState();
+    
+    // Inizializza le liste di media (singolo file o carosello)
+    if (widget.mediaFiles != null && widget.mediaFiles!.isNotEmpty) {
+      _mediaFiles = List<File>.from(widget.mediaFiles!);
+      if (widget.isImageFiles != null && widget.isImageFiles!.isNotEmpty) {
+        _isImageFiles = List<bool>.from(widget.isImageFiles!);
+      } else {
+        _isImageFiles = List<bool>.generate(
+          _mediaFiles.length,
+          (_) => widget.isImageFile,
+        );
+      }
+    } else {
+      _mediaFiles = [widget.mediaFile];
+      _isImageFiles = [widget.isImageFile];
+    }
     
     // Tips animation controller
     _tipsAnimController = AnimationController(
@@ -431,7 +460,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           
           if (_instagramAccounts.isEmpty) {
             setState(() {
-              _errorMessage = 'Nessun account Instagram selezionato';
+          _errorMessage = 'No Instagram account selected';
             });
           }
         }
@@ -567,12 +596,12 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           _twitterAccounts.isEmpty && _threadsAccounts.isEmpty &&
           _facebookAccounts.isEmpty && _tiktokAccounts.isEmpty) {
         setState(() {
-          _errorMessage = 'Nessun account social selezionato';
+      _errorMessage = 'No social account selected';
         });
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Errore nel recupero degli account: $e';
+    _errorMessage = 'Error fetching accounts: $e';
       });
     }
   }
@@ -584,7 +613,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         _twitterAccounts.isEmpty && _threadsAccounts.isEmpty &&
         _facebookAccounts.isEmpty && _tiktokAccounts.isEmpty) {
       setState(() {
-        _errorMessage = 'Nessun account social selezionato';
+      _errorMessage = 'No social account selected';
       });
       return;
     }
@@ -593,7 +622,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       _isUploading = true;
       _errorMessage = null;
       _uploadProgress = 0.0;
-      _statusMessage = 'Inizializzando upload...';
+    _statusMessage = 'Initializing upload...';
     });
     
     try {
@@ -603,7 +632,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       // Step 1.5: Generate and upload thumbnail if it's a video
       if (!widget.isImageFile) {
         setState(() {
-          _statusMessage = 'Generazione thumbnail...';
+      _statusMessage = 'Generating thumbnail...';
         });
         
         try {
@@ -654,9 +683,8 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         );
       }
       
-      // Step 3: Upload to YouTube for each account
-      List<Future<void>> youtubeUploadFutures = [];
-      
+      // Step 3: Upload to YouTube for each account (SEQUENTIAL to avoid Google Sign-In conflicts)
+      // YouTube accounts MUST be uploaded sequentially due to Google Sign-In limitations
       for (var account in _youtubeAccounts) {
         final accountId = account['id'] as String;
         
@@ -667,12 +695,20 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           videoDescription = widget.platformDescriptions['YouTube']![accountId]!;
         }
         
-        // Start upload for this account in parallel
-        youtubeUploadFutures.add(
-          _uploadToYouTube(
-            account: account,
-            description: videoDescription
-          )
+        // Get platform-specific title if available
+        String videoTitle;
+        if (widget.platformDescriptions.containsKey('YouTube') &&
+            widget.platformDescriptions['YouTube']!.containsKey('${accountId}_title')) {
+          videoTitle = widget.platformDescriptions['YouTube']!['${accountId}_title']!;
+        } else {
+          videoTitle = widget.title.isNotEmpty ? widget.title : widget.mediaFile.path.split('/').last;
+        }
+        
+        // Upload sequentially (NOT in parallel) to avoid Google Sign-In conflicts
+        await _uploadToYouTube(
+          account: account,
+          description: videoDescription,
+          title: videoTitle
         );
       }
       
@@ -764,10 +800,10 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         );
       }
       
-      // Wait for all uploads to complete
+      // Wait for all uploads to complete (YouTube uploads are already complete since they're sequential)
       List<Future<void>> allUploadFutures = [
         ...instagramUploadFutures, 
-        ...youtubeUploadFutures,
+        // youtubeUploadFutures removed - YouTube uploads are sequential
         ...twitterUploadFutures,
         ...threadsUploadFutures,
         ...facebookUploadFutures,
@@ -924,6 +960,10 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         throw Exception('Utente non autenticato');
       }
       
+      // Determina il file principale (primo media del carosello o singolo file)
+      final File primaryFile = _mediaFiles.isNotEmpty ? _mediaFiles.first : widget.mediaFile;
+      final bool primaryIsImage = _isImageFiles.isNotEmpty ? _isImageFiles.first : widget.isImageFile;
+      
       // Cloudflare R2 credentials - usando credenziali corrette da storage.md
       final String accessKeyId = '5e181628bad7dc5481c92c6f3899efd6';
       final String secretKey = '457366ba03debc4749681c3295b1f3afb10d438df3ae58e2ac883b5fb1b9e5b1';
@@ -932,13 +972,13 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       final String accountId = '3d945eb681944ec5965fecf275e41a9b';
       final String region = 'auto'; // R2 usa 'auto' come regione
       
-      // Generate a unique filename
-      final String fileExtension = path.extension(widget.mediaFile.path);
+      // Generate a unique filename per il file principale
+      final String fileExtension = path.extension(primaryFile.path);
       final String fileName = 'media_${DateTime.now().millisecondsSinceEpoch}_${currentUser.uid}$fileExtension';
       final String fileKey = fileName;
       
       // Get file bytes and size
-      final bytes = await widget.mediaFile.readAsBytes();
+      final bytes = await primaryFile.readAsBytes();
       final contentLength = bytes.length;
       
       // Calcola l'hash SHA-256 del contenuto
@@ -947,7 +987,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       
       // Set up request information
       final String httpMethod = 'PUT';
-      final String contentType = widget.isImageFile ? 'image/jpeg' : 'video/mp4';
+      final String contentType = primaryIsImage ? 'image/jpeg' : 'video/mp4';
       
       // SigV4 richiede data in formato ISO8601
       final now = DateTime.now().toUtc();
@@ -1124,7 +1164,9 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         }
         
         setState(() {
+          // Salva l'URL principale e inizializza la lista con il primo media
           _cloudflareUrl = publicUrl; // Use the correct public URL format
+          _cloudflareUrls = [publicUrl];
           _uploadProgress = 0.5; // 50%
                     _statusMessage = 'File structured successfully';
           _completedPlatforms.add('file_structuring');
@@ -1165,11 +1207,145 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
               _accountStatus[account['id']] = 'Upload file architecture';
             }
         });
+        
+        // Se ci sono più media nel carosello, carica anche gli altri su Cloudflare (senza modificare la UI principale)
+        if (_mediaFiles.length > 1) {
+          for (int i = 1; i < _mediaFiles.length; i++) {
+            try {
+              final File file = _mediaFiles[i];
+              final bool isImage = i < _isImageFiles.length ? _isImageFiles[i] : primaryIsImage;
+              final extraUrl = await _uploadSingleFileToCloudflareSilent(
+                file,
+                isImage: isImage,
+              );
+              if (extraUrl != null) {
+                setState(() {
+                  _cloudflareUrls.add(extraUrl);
+                });
+              }
+            } catch (e) {
+              print('Errore nel caricamento su Cloudflare R2 per media indice $i: $e');
+              // In caso di errore su un media extra, continuiamo comunque con gli altri
+            }
+          }
+        }
       } else {
         throw Exception('Errore nel caricamento su Cloudflare R2: Codice ${response.statusCode}, Risposta: ${response.body}');
       }
     } catch (e) {
       throw Exception('Errore nel caricamento su Cloudflare R2: $e');
+    }
+  }
+
+  // Upload aggiuntivo di un singolo file su Cloudflare R2 senza aggiornare la UI principale
+  Future<String?> _uploadSingleFileToCloudflareSilent(
+    File file, {
+    required bool isImage,
+  }) async {
+    try {
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('Utente non autenticato');
+      }
+
+      // Cloudflare R2 credentials
+      final String accessKeyId = '5e181628bad7dc5481c92c6f3899efd6';
+      final String secretKey = '457366ba03debc4749681c3295b1f3afb10d438df3ae58e2ac883b5fb1b9e5b1';
+      final String endpoint = 'https://3cd9209da4d0a20e311d486fc37f1a71.r2.cloudflarestorage.com';
+      final String bucketName = 'videos';
+      final String accountId = '3d945eb681944ec5965fecf275e41a9b';
+      final String region = 'auto';
+
+      // Unique filename for this media
+      final String fileExtension = path.extension(file.path);
+      final String fileName = 'media_${DateTime.now().millisecondsSinceEpoch}_${currentUser.uid}$fileExtension';
+      final String fileKey = fileName;
+
+      // Get file bytes and size
+      final bytes = await file.readAsBytes();
+      final contentLength = bytes.length;
+
+      // SHA-256 hash
+      final List<int> contentHash = sha256.convert(bytes).bytes;
+      final String payloadHash = hex.encode(contentHash);
+
+      // Request info
+      final String httpMethod = 'PUT';
+      final String contentType = isImage ? 'image/jpeg' : 'video/mp4';
+
+      final now = DateTime.now().toUtc();
+      final String amzDate = DateFormat("yyyyMMdd'T'HHmmss'Z'").format(now);
+      final String dateStamp = DateFormat("yyyyMMdd").format(now);
+
+      final Uri uri = Uri.parse('$endpoint/$bucketName/$fileKey');
+      final String host = uri.host;
+
+      final Map<String, String> headers = {
+        'host': host,
+        'content-type': contentType,
+        'x-amz-content-sha256': payloadHash,
+        'x-amz-date': amzDate,
+      };
+
+      String canonicalHeaders = '';
+      String signedHeaders = '';
+
+      final sortedHeaderKeys = headers.keys.toList()..sort();
+      for (final key in sortedHeaderKeys) {
+        canonicalHeaders += '${key.toLowerCase()}:${headers[key]}\n';
+        signedHeaders += '${key.toLowerCase()};';
+      }
+      signedHeaders = signedHeaders.substring(0, signedHeaders.length - 1);
+
+      final String canonicalUri = '/$bucketName/$fileKey';
+      final String canonicalQueryString = '';
+      final String canonicalRequest =
+          '$httpMethod\n$canonicalUri\n$canonicalQueryString\n$canonicalHeaders\n$signedHeaders\n$payloadHash';
+
+      final String algorithm = 'AWS4-HMAC-SHA256';
+      final String scope = '$dateStamp/$region/s3/aws4_request';
+      final String stringToSign =
+          '$algorithm\n$amzDate\n$scope\n${hex.encode(sha256.convert(utf8.encode(canonicalRequest)).bytes)}';
+
+      List<int> getSignatureKey(String key, String dateStamp, String regionName, String serviceName) {
+        final kDate = Hmac(sha256, utf8.encode('AWS4$key')).convert(utf8.encode(dateStamp)).bytes;
+        final kRegion = Hmac(sha256, kDate).convert(utf8.encode(regionName)).bytes;
+        final kService = Hmac(sha256, kRegion).convert(utf8.encode(serviceName)).bytes;
+        final kSigning = Hmac(sha256, kService).convert(utf8.encode('aws4_request')).bytes;
+        return kSigning;
+      }
+
+      final signingKey = getSignatureKey(secretKey, dateStamp, region, 's3');
+      final signature = hex.encode(Hmac(sha256, signingKey).convert(utf8.encode(stringToSign)).bytes);
+
+      final String authorizationHeader =
+          '$algorithm Credential=$accessKeyId/$scope, SignedHeaders=$signedHeaders, Signature=$signature';
+
+      final String uploadUrl = '$endpoint/$bucketName/$fileKey';
+
+      final http.Request request = http.Request('PUT', Uri.parse(uploadUrl));
+      request.headers['Host'] = host;
+      request.headers['Content-Type'] = contentType;
+      request.headers['Content-Length'] = contentLength.toString();
+      request.headers['X-Amz-Content-Sha256'] = payloadHash;
+      request.headers['X-Amz-Date'] = amzDate;
+      request.headers['Authorization'] = authorizationHeader;
+      request.bodyBytes = bytes;
+
+      final response = await http.Client().send(request);
+      final responseBody = await response.stream.bytesToString();
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final String publicUrl = 'https://pub-$accountId.r2.dev/$fileKey';
+        print('File aggiuntivo caricato su Cloudflare R2: $publicUrl');
+        return publicUrl;
+      } else {
+        print('Errore nel caricamento aggiuntivo su Cloudflare R2: Code ${response.statusCode}, Body: $responseBody');
+        return null;
+      }
+    } catch (e) {
+      print('Errore nell\'upload aggiuntivo su Cloudflare R2: $e');
+      return null;
     }
   }
   
@@ -1180,11 +1356,13 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
     required String description
   }) async {
     final String accountId = account['id'];
-    final bool isImage = widget.isImageFile;
+    final bool isImage = _isImageFiles.isNotEmpty ? _isImageFiles.first : widget.isImageFile;
+    final bool hasMultipleMedia = _cloudflareUrls.length > 1;
     
-    if (_cloudflareUrl == null) {
+    if (_cloudflareUrl == null && _cloudflareUrls.isEmpty) {
       setState(() {
-        _accountError[accountId] = 'URL del file non disponibile';
+        _accountError[accountId] =
+            'File URL is not available. Please restart this upload and try again.';
         _accountComplete[accountId] = true; // Mark as complete with error
       });
       return;
@@ -1236,6 +1414,18 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         throw Exception('Token di accesso Instagram non trovato');
       }
       
+      // Se ci sono più media, usa il flusso dedicato per il carosello Instagram
+      if (hasMultipleMedia) {
+        await _uploadInstagramCarousel(
+          accountId: accountId,
+          userId: userId.toString(),
+          accessToken: accessToken.toString(),
+          description: description,
+          contentType: contentType,
+        );
+        return;
+      }
+      
       // Verifica l'accessibilità dell'URL prima di procedere
       setState(() {
         _accountStatus[accountId] = 'Checking media accessibility...';
@@ -1243,7 +1433,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       });
       
       // Assicurati che l'URL sia nel formato corretto (pub-[accountId].r2.dev)
-      String cloudflareUrl = _cloudflareUrl!;
+      String cloudflareUrl = _cloudflareUrls.isNotEmpty ? _cloudflareUrls.first : _cloudflareUrl!;
       
       // Se non è nel formato corretto, lo convertiamo
       if (!cloudflareUrl.contains('pub-') || !cloudflareUrl.contains('.r2.dev')) {
@@ -1273,7 +1463,8 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         
         try {
           // Resize the image for Instagram
-          final resizedImageFile = await _resizeImageForInstagram(widget.mediaFile);
+          final File primaryFile = _mediaFiles.isNotEmpty ? _mediaFiles.first : widget.mediaFile;
+          final resizedImageFile = await _resizeImageForInstagram(primaryFile);
           
           if (resizedImageFile != null) {
             // Upload the resized image to Cloudflare
@@ -1314,7 +1505,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       const apiVersion = 'v18.0';
       
       setState(() {
-        _accountStatus[accountId] = 'Creating container Instagram...';
+    _accountStatus[accountId] = 'Creating Instagram container...';
         _accountProgress[accountId] = 0.7; // 70%
       });
       
@@ -1492,7 +1683,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         _accountMediaIds[accountId] = mediaId.toString();
         print('Instagram media_id saved for account $accountId: $mediaId');
       }
-      
+
       // Success!
       setState(() {
         _accountProgress[accountId] = 1.0; // 100%
@@ -1503,11 +1694,292 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       });
       
     } catch (e) {
+      final raw = e.toString();
+      String errorMessage =
+          'Something went wrong while publishing to Instagram. Please try again in a few minutes.';
+
+      if (raw.contains('Utente non autenticato') ||
+          raw.contains('token') ||
+          raw.contains('Token di accesso') ||
+          raw.toLowerCase().contains('auth')) {
+        errorMessage =
+            'Instagram authentication error. Please reconnect this Instagram account from the Social Accounts page, then try again.';
+      } else if (raw.contains('Account Instagram non trovato')) {
+        errorMessage =
+            'Instagram account not found. Please remove and reconnect this Instagram account, then try again.';
+      } else if (raw.contains('URL del file non accessibile') ||
+          raw.contains('accessibile') ||
+          raw.toLowerCase().contains('accessible')) {
+        errorMessage =
+            'Instagram could not reach the media URL. Please check your connection and try the upload again.';
+      } else if (raw.toLowerCase().contains('timeout') ||
+          raw.toLowerCase().contains('timed out')) {
+        errorMessage =
+            'Instagram took too long to process this media. Please try again, preferably with a smaller or shorter file.';
+      }
+
       setState(() {
-        _accountError[accountId] = 'Errore: ${e.toString()}';
+        _accountError[accountId] = errorMessage;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         // Add to completed platforms with error to show in progress circle
+        _completedPlatforms.add('Instagram');
+      });
+    }
+  }
+
+  // Upload di un carosello Instagram (più media in un unico post) per un account
+  Future<void> _uploadInstagramCarousel({
+    required String accountId,
+    required String userId,
+    required String accessToken,
+    required String description,
+    required String contentType,
+  }) async {
+    try {
+      // Limita comunque a massimo 10 media come da documentazione ufficiale
+      final int maxItems = 10;
+      final int totalItems = _cloudflareUrls.length.clamp(1, maxItems);
+
+      if (totalItems < 2) {
+        print('Carosello richiesto ma numero di media < 2, fallback al flusso singolo.');
+        return;
+      }
+
+      setState(() {
+        _accountStatus[accountId] = 'Preparing Instagram carousel...';
+        _accountProgress[accountId] = 0.65;
+      });
+
+      const apiVersion = 'v18.0';
+      final List<String> childrenIds = [];
+
+      // 1) Crea i container per tutti i media (children)
+      for (int i = 0; i < totalItems && i < _mediaFiles.length; i++) {
+        try {
+          final String baseUrl =
+              i < _cloudflareUrls.length ? _cloudflareUrls[i] : (_cloudflareUrl ?? '');
+          if (baseUrl.isEmpty) {
+            print('URL Cloudflare mancante per media indice $i, salto.');
+            continue;
+          }
+
+          bool isImage = i < _isImageFiles.length ? _isImageFiles[i] : widget.isImageFile;
+
+          // Normalizza URL nel formato pub-[accountId].r2.dev
+          String cloudflareUrl = baseUrl;
+          if (!cloudflareUrl.contains('pub-') || !cloudflareUrl.contains('.r2.dev')) {
+            final String fileName =
+                cloudflareUrl.contains('/') ? cloudflareUrl.split('/').last : cloudflareUrl;
+            const String cloudflareAccountId = '3d945eb681944ec5965fecf275e41a9b';
+            cloudflareUrl = 'https://pub-$cloudflareAccountId.r2.dev/$fileName';
+          }
+
+          // Per le immagini, ridimensiona prima il file locale e ri-carica su Cloudflare
+          String finalMediaUrl = cloudflareUrl;
+          if (isImage) {
+            try {
+              final File imageFile = _mediaFiles[i];
+              final resized = await _resizeImageForInstagram(imageFile);
+              if (resized != null) {
+                final resizedUrl = await _uploadResizedImageToCloudflare(resized);
+                if (resizedUrl != null) {
+                  finalMediaUrl = resizedUrl;
+                }
+              }
+            } catch (e) {
+              print('Errore nel resize del media carosello $i per Instagram: $e');
+            }
+          }
+
+          // Verifica accessibilità
+          final bool accessible = await _verifyFileAccessibility(finalMediaUrl);
+          if (!accessible) {
+            print('Media carosello $i non accessibile pubblicamente, salto questo media');
+            continue;
+          }
+
+          final Map<String, String> childBody = {
+            'access_token': accessToken,
+            'is_carousel_item': 'true',
+          };
+
+          if (isImage) {
+            childBody['image_url'] = finalMediaUrl;
+          } else {
+            childBody['video_url'] = finalMediaUrl;
+          }
+
+          print('Creating Instagram carousel child (index=$i) with body: $childBody');
+
+          final childResponse = await http
+              .post(
+                Uri.parse('https://graph.instagram.com/$apiVersion/$userId/media'),
+                body: childBody,
+              )
+              .timeout(const Duration(seconds: 60));
+
+          if (childResponse.statusCode != 200) {
+            print('Errore creazione container child Instagram idx=$i: ${childResponse.body}');
+            continue;
+          }
+
+          final childData = json.decode(childResponse.body);
+          final childId = childData['id'];
+          if (childId == null) {
+            print('Nessun childId per media carosello idx=$i');
+            continue;
+          }
+
+          childrenIds.add(childId.toString());
+
+          setState(() {
+            _accountStatus[accountId] = 'Preparing media ${i + 1}/$totalItems...';
+            _accountProgress[accountId] = 0.65 + ((i + 1) / totalItems) * 0.15; // 65–80%
+          });
+        } catch (e) {
+          print('Errore generale creazione child carosello idx=$i per account $accountId: $e');
+        }
+      }
+
+      if (childrenIds.length < 2) {
+        print('Numero di children validi < 2, impossibile creare un carosello.');
+        throw Exception('Numero insufficiente di media validi per carosello.');
+      }
+
+      // 2) Crea il container carosello principale
+      final String childrenParam = childrenIds.join(',');
+
+      setState(() {
+        _accountStatus[accountId] = 'Creating Instagram carousel container...';
+        _accountProgress[accountId] = 0.8;
+      });
+
+      final Map<String, String> carouselBody = {
+        'access_token': accessToken,
+        'caption': description.isNotEmpty ? description : widget.title,
+        'media_type': 'CAROUSEL',
+        'children': childrenParam,
+      };
+
+      final carouselResponse = await http
+          .post(
+            Uri.parse('https://graph.instagram.com/$apiVersion/$userId/media'),
+            body: carouselBody,
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (carouselResponse.statusCode != 200) {
+        print('Errore creazione container carosello Instagram: ${carouselResponse.body}');
+        throw Exception('Errore nella creazione del container carosello Instagram.');
+      }
+
+      final carouselData = json.decode(carouselResponse.body);
+      final String? carouselId = carouselData['id']?.toString();
+      if (carouselId == null || carouselId.isEmpty) {
+        throw Exception('ID container carosello non valido.');
+      }
+
+      // 3) Polling stato carosello
+      bool isCarouselReady = false;
+      int attempt = 0;
+      const int maxAttempts = 30;
+      String lastStatus = '';
+
+      while (!isCarouselReady && attempt < maxAttempts) {
+        attempt++;
+
+        setState(() {
+          _accountStatus[accountId] =
+              'Carousel processing (${attempt.toString()}/$maxAttempts)...';
+          _accountProgress[accountId] = 0.8 + (attempt / maxAttempts * 0.1); // 80–90%
+        });
+
+        try {
+          final statusResponse = await http
+              .get(
+                Uri.parse('https://graph.instagram.com/$apiVersion/$carouselId').replace(
+                  queryParameters: {
+                    'fields': 'status_code,status',
+                    'access_token': accessToken,
+                  },
+                ),
+              )
+              .timeout(const Duration(seconds: 15));
+
+          if (statusResponse.statusCode == 200) {
+            final statusData = json.decode(statusResponse.body);
+            final status = statusData['status_code'];
+            final detailed = statusData['status'] ?? 'N/A';
+            lastStatus = status ?? '';
+            print('Status container carosello: $status, detailed=$detailed');
+
+            if (status == 'FINISHED') {
+              isCarouselReady = true;
+              break;
+            } else if (status == 'ERROR') {
+              if (attempt > 10) {
+                throw Exception('Errore nel processamento carosello: $detailed');
+              }
+            }
+          }
+        } catch (e) {
+          print('Errore polling container carosello: $e');
+          if (attempt > 15) {
+            throw e;
+          }
+        }
+
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
+      if (!isCarouselReady && lastStatus != 'ERROR') {
+        throw Exception('Timeout nel processamento del carosello dopo $maxAttempts tentativi.');
+      }
+
+      // 4) Pubblica il carosello
+      setState(() {
+        _accountStatus[accountId] = 'Publishing Instagram carousel...';
+        _accountProgress[accountId] = 0.9;
+      });
+
+      final publishResponse = await http
+          .post(
+            Uri.parse('https://graph.instagram.com/$apiVersion/$userId/media_publish'),
+            body: {
+              'access_token': accessToken,
+              'creation_id': carouselId,
+            },
+          )
+          .timeout(const Duration(seconds: 60));
+
+      print('Publish response carosello: ${publishResponse.body}');
+
+      if (publishResponse.statusCode != 200) {
+        throw Exception('Errore nella pubblicazione del carosello: ${publishResponse.body}');
+      }
+
+      final publishData = json.decode(publishResponse.body);
+      final String? mediaId = publishData['id']?.toString();
+      if (mediaId != null && mediaId.isNotEmpty) {
+        _accountMediaIds[accountId] = mediaId;
+        print('Instagram carousel media_id saved for account $accountId: $mediaId');
+      }
+
+      setState(() {
+        _accountProgress[accountId] = 1.0; // 100%
+        _accountStatus[accountId] = 'Uploaded Instagram carousel successfully!';
+        _accountComplete[accountId] = true;
+        _accountError[accountId] = null;
+        _completedPlatforms.add('Instagram');
+      });
+    } catch (e) {
+      print('Errore upload carosello Instagram per account $accountId: $e');
+      setState(() {
+        _accountError[accountId] =
+            'Instagram carousel upload failed. Please try again. If this keeps happening, try with fewer media items or different files.';
+        _accountComplete[accountId] = true;
+        _accountProgress[accountId] = 1.0;
         _completedPlatforms.add('Instagram');
       });
     }
@@ -1516,13 +1988,15 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
   // Upload to YouTube using the Cloudflare URL
   Future<void> _uploadToYouTube({
     required Map<String, dynamic> account,
-    required String description
+    required String description,
+    required String title,
   }) async {
     final String accountId = account['id'];
     
     if (_cloudflareUrl == null) {
       setState(() {
-        _accountError[accountId] = 'File URL not available';
+        _accountError[accountId] =
+            'File URL is not available. Please restart this upload and try again.';
         _accountComplete[accountId] = true; // Mark as complete with error
       });
       return;
@@ -1596,27 +2070,33 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         throw Exception('Impossibile ottenere il token di accesso');
       }
       
-      // Prepare video metadata
-      // Check if there's a custom title for YouTube in platformDescriptions
-      String videoTitle;
-      if (widget.platformDescriptions.containsKey('YouTube') &&
-          widget.platformDescriptions['YouTube']!.containsKey('${accountId}_title')) {
-        videoTitle = widget.platformDescriptions['YouTube']!['${accountId}_title']!;
-      } else {
-        videoTitle = widget.title.isNotEmpty ? widget.title : widget.mediaFile.path.split('/').last;
-      }
+      // Prepare video metadata with user-selected options
+      // Get YouTube options for this account, with defaults
+      final youtubeOptions = widget.youtubeOptions?[accountId] ?? {
+        'categoryId': '22',
+        'privacyStatus': 'public',
+        'license': 'youtube',
+        'notifySubscribers': true,
+        'embeddable': true,
+        'madeForKids': false,
+      };
       
       final videoMetadata = {
         'snippet': {
-          'title': videoTitle,
+          'title': title, // Use the title passed as parameter
           'description': description,
-          'categoryId': '22', // People & Blogs category
+          'categoryId': youtubeOptions['categoryId'] ?? '22',
         },
         'status': {
-          'privacyStatus': 'public',
-          'madeForKids': false,
+          'privacyStatus': youtubeOptions['privacyStatus'] ?? 'public',
+          'license': youtubeOptions['license'] ?? 'youtube',
+          'embeddable': youtubeOptions['embeddable'] ?? true,
+          'madeForKids': youtubeOptions['madeForKids'] ?? false,
         }
       };
+      
+      // Get notifySubscribers parameter
+      final notifySubscribers = youtubeOptions['notifySubscribers'] ?? true;
       
       // First, upload the video
       setState(() {
@@ -1709,8 +2189,10 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       
       while (metadataRetries < maxMetadataRetries && (metadataResponse == null || metadataResponse.statusCode != 200)) {
         try {
+          // Build metadata URI with notifySubscribers parameter
+          final metadataUri = Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status${notifySubscribers ? '&notifySubscribers=true' : ''}');
           metadataResponse = await http.put(
-            Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status'),
+            metadataUri,
             headers: {
               'Authorization': 'Bearer ${googleAuth.accessToken}',
               'Content-Type': 'application/json',
@@ -1719,7 +2201,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
               'id': videoId,
               ...videoMetadata,
             }),
-          ).timeout(
+            ).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw TimeoutException('Richiesta di aggiornamento metadati scaduta.'),
           );
@@ -1832,19 +2314,23 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       print('YouTube upload error: $e');
       
       // Provide more specific error messages based on the error type
-      String errorMessage = 'Error uploading to YouTube, Retry';
+      String errorMessage =
+          'Something went wrong while publishing to YouTube. Please try again. If the problem persists, check your connection or try a smaller file.';
       
-      if (e.toString().contains('YouTube account not found') || 
+      if (e.toString().contains('YouTube account not found') ||
           e.toString().contains('token')) {
-        errorMessage = 'YouTube authentication error. Please reconnect your account.';
-      } else if (e.toString().contains('timeout')) {
-        errorMessage = 'Timeout during upload to YouTube.';
-      } else if (e.toString().contains('quota')) {
-        errorMessage = 'Quota YouTube superata. Riprova più tardi.';
+        errorMessage =
+            'YouTube authentication error. Please reconnect this YouTube account from the Social Accounts page, then try again.';
+      } else if (e.toString().toLowerCase().contains('timeout')) {
+        errorMessage =
+            'Upload to YouTube timed out. Please check your internet connection and try again.';
+      } else if (e.toString().toLowerCase().contains('quota')) {
+        errorMessage =
+            'Your YouTube daily quota appears to be exceeded. Please wait a few hours or use a different Google account.';
       }
       
       setState(() {
-        _accountError[accountId] = 'Errore: ${errorMessage}';
+        _accountError[accountId] = errorMessage;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         _completedPlatforms.add('YouTube');
@@ -1861,7 +2347,8 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
     
     if (_cloudflareUrl == null) {
       setState(() {
-        _accountError[accountId] = 'File URL not available';
+        _accountError[accountId] =
+            'File URL is not available. Please restart this upload and try again.';
         _accountComplete[accountId] = true; // Mark as complete with error
       });
       return;
@@ -2001,19 +2488,23 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       print('Twitter upload error: $e');
       
       // Provide more specific error messages based on the error type
-      String errorMessage = 'Error uploading to Twitter, Retry';
+      String errorMessage =
+          'Something went wrong while publishing to Twitter. Please try again.';
       
-      if (e.toString().contains('Twitter account not found') || 
+      if (e.toString().contains('Twitter account not found') ||
           e.toString().contains('token')) {
-        errorMessage = 'Twitter authentication error. Please reconnect your account.';
-      } else if (e.toString().contains('timeout')) {
-        errorMessage = 'Timeout during upload to Twitter.';
+        errorMessage =
+            'Twitter authentication error. Please reconnect this Twitter account from the Social Accounts page, then try again.';
+      } else if (e.toString().toLowerCase().contains('timeout')) {
+        errorMessage =
+            'Upload to Twitter timed out. Please check your internet connection and try again.';
       } else if (e.toString().contains('media upload failed')) {
-        errorMessage = 'Errore durante il caricamento del media su Twitter.';
+        errorMessage =
+            'Twitter could not process this media. Try converting the video to a different format or a smaller size, then upload again.';
       }
       
       setState(() {
-        _accountError[accountId] = 'Errore: ${errorMessage}';
+        _accountError[accountId] = errorMessage;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         _completedPlatforms.add('Twitter');
@@ -2030,7 +2521,8 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
     
     if (_cloudflareUrl == null) {
       setState(() {
-        _accountError[accountId] = 'File URL not available';
+        _accountError[accountId] =
+            'File URL is not available. Please restart this upload and try again.';
         _accountComplete[accountId] = true; // Mark as complete with error
       });
       return;
@@ -2100,19 +2592,19 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       if (!isAccessible) {
         print('ATTENZIONE: URL del file non accessibile pubblicamente: $threadsMediaUrl');
         setState(() {
-          _accountStatus[accountId] = 'Il media potrebbe non essere accessibile, tentativo in corso...';
+      _accountStatus[accountId] = 'The media may not be publicly accessible, attempting anyway...';
           _accountProgress[accountId] = 0.7;
         });
       } else {
         setState(() {
-          _accountStatus[accountId] = 'Media accessible, creating container Threads...';
+      _accountStatus[accountId] = 'Media accessible, creating Threads container...';
           _accountProgress[accountId] = 0.7;
         });
       }
       
       // Step 1: Create a media container for Threads
       setState(() {
-        _accountStatus[accountId] = 'Creating container Threads...';
+    _accountStatus[accountId] = 'Creating Threads container...';
         _accountProgress[accountId] = 0.75; // 75%
       });
       
@@ -2206,19 +2698,24 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       print('Threads upload error: $e');
       
       // Provide more specific error messages based on the error type
-      String errorMessage = 'Error uploading to Threads, Retry';
+      String errorMessage =
+          'Something went wrong while publishing to Threads. Please try again.';
       
-      if (e.toString().contains('Threads account not found') || 
+      if (e.toString().contains('Threads account not found') ||
           e.toString().contains('token')) {
-        errorMessage = 'Errore di autenticazione Threads. Riconnetti il tuo account.';
-      } else if (e.toString().contains('timeout')) {
-        errorMessage = 'Timeout durante il caricamento su Threads.';
-      } else if (e.toString().contains('container') || e.toString().contains('media')) {
-        errorMessage = 'Errore nell\'elaborazione del media. Prova un file o formato diverso.';
+        errorMessage =
+            'Threads authentication error. Please reconnect this Threads account from the Social Accounts page, then try again.';
+      } else if (e.toString().toLowerCase().contains('timeout')) {
+        errorMessage =
+            'Upload to Threads timed out. Please check your internet connection and try again.';
+      } else if (e.toString().contains('container') ||
+          e.toString().contains('media')) {
+        errorMessage =
+            'Threads could not process this media. Try a different file (format or size) and upload again.';
       }
       
       setState(() {
-        _accountError[accountId] = 'Errore: ${errorMessage}';
+        _accountError[accountId] = errorMessage;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         _completedPlatforms.add('Threads');
@@ -2235,7 +2732,8 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
     
     if (_cloudflareUrl == null) {
       setState(() {
-        _accountError[accountId] = 'URL del file non disponibile';
+        _accountError[accountId] =
+            'File URL is not available. Please restart this upload and try again.';
         _accountComplete[accountId] = true; // Mark as complete with error
       });
       return;
@@ -2275,7 +2773,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       
       // Step 1: Query creator info to get privacy level options
       setState(() {
-        _accountStatus[accountId] = 'Recupero informazioni creator...';
+      _accountStatus[accountId] = 'Retrieving creator info...';
         _accountProgress[accountId] = 0.65; // 65%
       });
       
@@ -2385,7 +2883,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         
         // Step 4: Check post status
         setState(() {
-          _accountStatus[accountId] = 'Monitoraggio stato pubblicazione...';
+      _accountStatus[accountId] = 'Monitoring publish status...';
           _accountProgress[accountId] = 0.85; // 85%
         });
         
@@ -2397,7 +2895,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           attempts++;
           
           setState(() {
-            _accountStatus[accountId] = 'Verifica stato pubblicazione (${attempts}/${maxAttempts})...';
+            _accountStatus[accountId] = 'Checking publish status (${attempts}/${maxAttempts})...';
             _accountProgress[accountId] = 0.85 + (attempts / maxAttempts * 0.1); // 85-95%
           });
           
@@ -2480,7 +2978,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         
         // Step 4: Check post status
         setState(() {
-          _accountStatus[accountId] = 'Monitoraggio stato pubblicazione...';
+      _accountStatus[accountId] = 'Monitoring publish status...';
           _accountProgress[accountId] = 0.85; // 85%
         });
         
@@ -2492,7 +2990,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           attempts++;
           
           setState(() {
-            _accountStatus[accountId] = 'Verifica stato pubblicazione (${attempts}/${maxAttempts})...';
+            _accountStatus[accountId] = 'Checking publish status (${attempts}/${maxAttempts})...';
             _accountProgress[accountId] = 0.85 + (attempts / maxAttempts * 0.1); // 85-95%
           });
           
@@ -2556,7 +3054,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         print('Retrying TikTok upload (attempt ${_tiktokUploadAttempts[accountId]} of $_maxTikTokAttempts)');
         
         setState(() {
-          _accountStatus[accountId] = 'Tentativo di riupload ${_tiktokUploadAttempts[accountId]} di $_maxTikTokAttempts...';
+      _accountStatus[accountId] = 'Retry attempt ${_tiktokUploadAttempts[accountId]} of $_maxTikTokAttempts...';
           _accountProgress[accountId] = 0.5; // Reset progress for retry
         });
         
@@ -2566,22 +3064,30 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       }
       
       // Provide more specific error messages based on the error type
-      String errorMessage = 'Error uploading to TikTok, Retry';
+      String errorMessage =
+          'Something went wrong while publishing to TikTok. Please try again.';
       
-      if (e.toString().contains('token') || e.toString().contains('autenticazione')) {
-        errorMessage = 'Errore di autenticazione TikTok. Riconnetti il tuo account.';
-      } else if (e.toString().contains('accessibilità') || e.toString().contains('accessible')) {
-        errorMessage = 'URL del file non accessibile. TikTok richiede URL accessibili.';
-      } else if (e.toString().contains('timeout') || e.toString().contains('Timeout')) {
-        errorMessage = 'Timeout durante la pubblicazione su TikTok.';
+      if (e.toString().contains('token') ||
+          e.toString().contains('autenticazione')) {
+        errorMessage =
+            'TikTok authentication error. Please reconnect this TikTok account from the Social Accounts page, then try again.';
+      } else if (e.toString().contains('accessibilità') ||
+          e.toString().contains('accessible')) {
+        errorMessage =
+            'File URL is not publicly accessible. Please try the upload again. If it keeps failing, wait a few minutes and retry.';
+      } else if (e.toString().toLowerCase().contains('timeout')) {
+        errorMessage =
+            'Upload to TikTok timed out. Please check your internet connection and try again.';
       } else if (e.toString().contains('privacy_level_option_mismatch')) {
-        errorMessage = 'Opzioni di privacy non valide per questo account TikTok.';
+        errorMessage =
+            'Selected privacy options are not valid for this TikTok account. Open TikTok options for this account and choose a supported privacy level, then try again.';
       } else if (e.toString().contains('unaudited_client')) {
-        errorMessage = 'App TikTok richiede audit per pubblicazione pubblica. Completa l\'audit "Content Sharing" nel portale sviluppatori TikTok.';
+        errorMessage =
+            'Your TikTok app must pass the "Content Sharing" audit before public posts can be published. Complete the audit in the TikTok Developer Portal, then try again.';
       }
       
       setState(() {
-        _accountError[accountId] = 'Errore: $errorMessage';
+        _accountError[accountId] = errorMessage;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         _completedPlatforms.add('TikTok');
@@ -2868,14 +3374,17 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
   
   // Generate thumbnail for video files
   Future<String?> _generateThumbnail() async {
-    if (widget.isImageFile) return null;
+    // Usa sempre il PRIMO media (video) per generare la thumbnail
+    final bool primaryIsImage = _isImageFiles.isNotEmpty ? _isImageFiles.first : widget.isImageFile;
+    if (primaryIsImage) return null;
+    final File primaryFile = _mediaFiles.isNotEmpty ? _mediaFiles.first : widget.mediaFile;
     
     try {
-      print('Generating thumbnail for: ${widget.mediaFile.path}');
+      print('Generating thumbnail for: ${primaryFile.path}');
       
       // Use video_thumbnail package to generate thumbnail
       final thumbnailBytes = await VideoThumbnail.thumbnailData(
-        video: widget.mediaFile.path,
+        video: primaryFile.path,
         imageFormat: ImageFormat.JPEG,
         quality: 80,
         maxWidth: 320, // Reasonable width for thumbnails
@@ -3413,7 +3922,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         
         if (!mounted) return;
         setState(() {
-          _accountStatus[accountId] = 'Tentativo di riupload ${_facebookUploadAttempts[accountId]} di $_maxFacebookAttempts...';
+      _accountStatus[accountId] = 'Retry attempt ${_facebookUploadAttempts[accountId]} of $_maxFacebookAttempts...';
           _accountProgress[accountId] = 0.5; // Reset progress for retry
         });
         
@@ -3426,14 +3935,17 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       setState(() {
         String errorMsg = e.toString();
         if (errorMsg.contains('accessibilità') || errorMsg.contains('accessible')) {
-          errorMsg = 'URL del file non accessibile. Controlla connessione internet.';
+          errorMsg =
+              'Facebook could not access the video URL. Please check your internet connection, then try the upload again.';
         } else if (errorMsg.contains('token')) {
-          errorMsg = 'Errore di autenticazione. Riconnetti il tuo account Facebook.';
+          errorMsg =
+              'Facebook authentication error. Please reconnect this Facebook page from the Social Accounts page, then try again.';
         } else if (errorMsg.contains('fetch video file')) {
-          errorMsg = 'Facebook non riesce a recuperare il video. Formato o dimensione non supportati.';
+          errorMsg =
+              'Facebook could not fetch this video file. Check that the video format and size are supported, then try again.';
         }
         
-        _accountError[accountId] = 'Errore: $errorMsg';
+        _accountError[accountId] = errorMsg;
         _accountComplete[accountId] = true; // Mark as complete with error
         _accountProgress[accountId] = 1.0; // 100% (with error)
         _completedPlatforms.add('Facebook');
@@ -4848,7 +5360,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
       }
       
       // Check if we're still mounted and user is authenticated
-      if (!mounted || _cloudflareUrl == null) return;
+      if (!mounted || (_cloudflareUrl == null && _cloudflareUrls.isEmpty)) return;
       
       final User? currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) {
@@ -5006,9 +5518,12 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         accountsByPlatform[platform] = completeAccounts;
       });
       
-      // Get video duration if it's a video file
+      // Determina se siamo in modalità multi-media (carosello)
+      final bool hasMultipleMedia = _mediaFiles.length > 1 && _cloudflareUrls.length > 1;
+
+      // Get video duration solo se NON è carosello e non è immagine
       Map<String, int>? videoDuration;
-      if (!widget.isImageFile) {
+      if (!hasMultipleMedia && !widget.isImageFile) {
         videoDuration = await _getVideoDuration();
       }
       
@@ -5037,6 +5552,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         'thumbnail_path': _thumbnailCloudflareUrl ?? _cloudflareUrl, // Use thumbnail URL if available, otherwise video URL
         'thumbnail_cloudflare_url': _thumbnailCloudflareUrl ?? _cloudflareUrl, // Keep this field for compatibility
         'cloudflare_url': _cloudflareUrl, // Add this field for completeness
+        if (_cloudflareUrls.isNotEmpty) 'cloudflare_urls': _cloudflareUrls,
         'accounts': accountsByPlatform,
         'user_id': currentUser.uid,
         'is_image': widget.isImageFile,
@@ -5145,9 +5661,22 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
         return;
       }
 
-      // Calculate credits to deduct based on file size
-      final fileSizeBytes = widget.mediaFile.lengthSync();
-      final fileSizeMB = fileSizeBytes / (1024 * 1024);
+      // Calcola i crediti da sottrarre in base alla dimensione TOTALE di tutti i media
+      int totalBytes = 0;
+      if (_mediaFiles.isNotEmpty) {
+        for (final file in _mediaFiles) {
+          try {
+            totalBytes += file.lengthSync();
+          } catch (e) {
+            print('Errore nel leggere la dimensione del file per i crediti: $e');
+          }
+        }
+      } else {
+        // Fallback: usa il singolo mediaFile
+        totalBytes = widget.mediaFile.lengthSync();
+      }
+
+      final fileSizeMB = totalBytes / (1024 * 1024);
       final creditsToDeduct = (fileSizeMB * 0.4).ceil();
       
       print('Deducting credits - file size: ${fileSizeMB.toStringAsFixed(2)}MB, credits to deduct: $creditsToDeduct');
@@ -5322,9 +5851,22 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
   // Metodo per calcolare i crediti sottratti
   int _calculateCreditsDeducted() {
     try {
-      // Calcola la dimensione del file in megabyte
-      final fileSizeBytes = widget.mediaFile.lengthSync();
-      final fileSizeMB = fileSizeBytes / (1024 * 1024);
+      // Calcola la dimensione TOTALE dei file in megabyte (carosello incluso)
+      int totalBytes = 0;
+      if (_mediaFiles.isNotEmpty) {
+        for (final file in _mediaFiles) {
+          try {
+            totalBytes += file.lengthSync();
+          } catch (e) {
+            print('Errore nel leggere la dimensione del file per il calcolo crediti: $e');
+          }
+        }
+      } else {
+        // Fallback: usa il singolo mediaFile
+        totalBytes = widget.mediaFile.lengthSync();
+      }
+
+      final fileSizeMB = totalBytes / (1024 * 1024);
       
       // Moltiplica per 0.40 e arrotonda per eccesso
       final creditsToDeduct = (fileSizeMB * 0.40).ceil();
@@ -5832,7 +6374,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'La tua app TikTok è stata approvata ma richiede un audit aggiuntivo per pubblicare contenuti pubblici.',
+              'Your TikTok app is LIVE but requires an additional audit to publish public content.',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.black87,
@@ -5894,7 +6436,7 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
             ),
             const SizedBox(height: 16),
             const Text(
-              'Per completare l\'audit:',
+              'How to complete the audit:',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
@@ -5903,11 +6445,11 @@ class _InstagramUploadPageState extends State<InstagramUploadPage> with TickerPr
             ),
             const SizedBox(height: 8),
             Text(
-              '1. Vai su developers.tiktok.com\n'
-                              '2. Seleziona la tua app "Fluzar"\n'
-              '3. Clicca su "App review" → "Content Sharing"\n'
-              '4. Compila il form di audit\n'
-              '5. Attendi l\'approvazione (1-3 giorni)',
+              '1. Go to developers.tiktok.com\n'
+              '2. Select your app "Fluzar"\n'
+              '3. Click "App review" → "Content Sharing"\n'
+              '4. Fill out the audit form\n'
+              '5. Wait for approval (1–3 days)',
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey.shade700,

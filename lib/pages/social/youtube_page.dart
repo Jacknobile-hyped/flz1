@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -429,177 +430,238 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
       return;
     }
 
-    final selectedChannel = await showDialog<Map<String, dynamic>>(
+    // Set per tenere traccia dei canali selezionati
+    Set<int> selectedChannels = <int>{};
+
+    final selectedChannelsList = await showDialog<List<Map<String, dynamic>>>(
       context: context,
       barrierDismissible: true,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        insetPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.9, // Almost full width
-          constraints: BoxConstraints(
-            maxWidth: 500,
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Image.asset(
-                        'assets/loghi/logo_yt.png',
-                        width: 24,
-                        height: 24,
-                      ),
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Select Channel',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Close button
-                    IconButton(
-                      icon: Icon(Icons.close, color: Colors.grey[500]),
-                      onPressed: () => Navigator.of(context).pop(),
-                      padding: EdgeInsets.zero,
-                      constraints: BoxConstraints(),
-                      splashRadius: 24,
-                    ),
-                  ],
-                ),
-              ),
-              Divider(height: 1, thickness: 1, color: Colors.grey[200]),
-              Flexible(
-                child: ListView.separated(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  shrinkWrap: true,
-                  itemCount: channels.length,
-                  separatorBuilder: (context, index) => Divider(height: 1, indent: 90, endIndent: 24),
-                  itemBuilder: (context, index) {
-                    final channel = channels[index];
-                    return ListTile(
-                      contentPadding: EdgeInsets.fromLTRB(24, 8, 24, 8),
-                      leading: CircleAvatar(
-                        radius: 26,
-                        backgroundImage: NetworkImage(channel['thumbnailUrl']),
-                        backgroundColor: Colors.red.withOpacity(0.1),
-                      ),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              channel['title'],
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          // RIMOSSO BADGE PHONE VERIFIED
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.people_outline,
-                                size: 14,
-                                color: Colors.grey[600],
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                '${channel['subscriberCount']} subscribers',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.video_library_outlined,
-                                size: 14,
-                                color: Colors.grey[600],
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                '${channel['videoCount']} videos',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: Container(
+          insetPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9, // Almost full width
+            constraints: BoxConstraints(
+              maxWidth: 500,
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
+                          shape: BoxShape.circle,
                         ),
-                        padding: EdgeInsets.all(8),
-                        child: Icon(
-                          Icons.add,
-                          size: 16,
-                          color: Colors.red,
+                        child: Image.asset(
+                          'assets/loghi/logo_yt.png',
+                          width: 24,
+                          height: 24,
                         ),
                       ),
-                      onTap: () => Navigator.of(context).pop(channel),
-                    );
-                  },
-                ),
-              ),
-              Divider(height: 1, thickness: 1, color: Colors.grey[200]),
-              Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(
-                  child: Text(
-                    'Tap on a channel to connect it to Fluzar',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                      fontStyle: FontStyle.italic,
-                    ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Select Channels',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[800],
+                              ),
+                            ),
+                            if (selectedChannels.isNotEmpty)
+                              Text(
+                                '${selectedChannels.length} selected',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Close button
+                      IconButton(
+                        icon: Icon(Icons.close, color: Colors.grey[500]),
+                        onPressed: () => Navigator.of(context).pop(),
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(),
+                        splashRadius: 24,
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                Divider(height: 1, thickness: 1, color: Colors.grey[200]),
+                Flexible(
+                  child: ListView.separated(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    shrinkWrap: true,
+                    itemCount: channels.length,
+                    separatorBuilder: (context, index) => Divider(height: 1, indent: 90, endIndent: 24),
+                    itemBuilder: (context, index) {
+                      final channel = channels[index];
+                      final isSelected = selectedChannels.contains(index);
+                      
+                      return ListTile(
+                        contentPadding: EdgeInsets.fromLTRB(24, 8, 24, 8),
+                        leading: CircleAvatar(
+                          radius: 26,
+                          backgroundImage: NetworkImage(channel['thumbnailUrl']),
+                          backgroundColor: Colors.red.withOpacity(0.1),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                channel['title'],
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.people_outline,
+                                  size: 14,
+                                  color: Colors.grey[600],
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  '${channel['subscriberCount']} subscribers',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.video_library_outlined,
+                                  size: 14,
+                                  color: Colors.grey[600],
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  '${channel['videoCount']} videos',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        trailing: Checkbox(
+                          value: isSelected,
+                          onChanged: (bool? value) {
+                            setState(() {
+                              if (value == true) {
+                                selectedChannels.add(index);
+                              } else {
+                                selectedChannels.remove(index);
+                              }
+                            });
+                          },
+                          activeColor: Colors.red,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        onTap: () {
+                          setState(() {
+                            if (isSelected) {
+                              selectedChannels.remove(index);
+                            } else {
+                              selectedChannels.add(index);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+                Divider(height: 1, thickness: 1, color: Colors.grey[200]),
+                Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Center(
+                        child: Text(
+                          'Select multiple channels to connect them to Fluzar',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[500],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      // Connect button
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: selectedChannels.isNotEmpty
+                              ? () {
+                                  final selectedChannelsData = selectedChannels
+                                      .map((index) => channels[index])
+                                      .toList();
+                                  Navigator.of(context).pop(selectedChannelsData);
+                                }
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            'Connect ${selectedChannels.length} Channel${selectedChannels.length != 1 ? 's' : ''}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
 
-    if (selectedChannel != null) {
-      await _connectChannel(selectedChannel);
+    if (selectedChannelsList != null && selectedChannelsList.isNotEmpty) {
+      await _connectMultipleChannels(selectedChannelsList);
     }
   }
 
@@ -623,6 +685,58 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
 
     } catch (e) {
       print('Error connecting channel: $e');
+    }
+  }
+
+  Future<void> _connectMultipleChannels(List<Map<String, dynamic>> channels) async {
+    try {
+      setState(() => _isLoading = true);
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Connessione di tutti i canali selezionati
+      for (final channel in channels) {
+        await _database.child('users/${user.uid}/youtube/${channel['id']}').set({
+          'channel_name': channel['title'],
+          'channel_id': channel['id'],
+          'subscriber_count': channel['subscriberCount'],
+          'last_sync': DateTime.now().millisecondsSinceEpoch,
+          'thumbnail_url': channel['thumbnailUrl'],
+          'video_count': channel['videoCount'],
+          'is_verified': channel['isVerified'] ?? false,
+          'status': 'active',
+        });
+      }
+
+      await _loadAccounts();
+
+      // Mostra messaggio di successo
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Successfully connected ${channels.length} channel${channels.length != 1 ? 's' : ''}',
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+
+    } catch (e) {
+      print('Error connecting multiple channels: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error connecting channels: $e'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -746,18 +860,52 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                // Effetto vetro semi-trasparente opaco
+                color: theme.brightness == Brightness.dark 
+                    ? Colors.white.withOpacity(0.15) 
+                    : Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(20),
+                // Bordo con effetto vetro più sottile
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
+                // Ombra per effetto profondità e vetro
                 boxShadow: [
                   BoxShadow(
                     color: theme.brightness == Brightness.dark 
-                        ? Colors.black.withOpacity(0.3)
-                        : Colors.black.withOpacity(0.05),
-                    spreadRadius: 1,
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                        ? Colors.black.withOpacity(0.4)
+                        : Colors.black.withOpacity(0.15),
+                    blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+                    spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+                    offset: const Offset(0, 10),
+                  ),
+                  // Ombra interna per effetto vetro
+                  BoxShadow(
+                    color: theme.brightness == Brightness.dark 
+                        ? Colors.white.withOpacity(0.1)
+                        : Colors.white.withOpacity(0.6),
+                    blurRadius: 2,
+                    spreadRadius: -2,
+                    offset: const Offset(0, 2),
                   ),
                 ],
+                // Gradiente più sottile per effetto vetro
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: theme.brightness == Brightness.dark 
+                      ? [
+                          Colors.white.withOpacity(0.2),
+                          Colors.white.withOpacity(0.1),
+                        ]
+                      : [
+                          Colors.white.withOpacity(0.3),
+                          Colors.white.withOpacity(0.2),
+                        ],
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -847,17 +995,52 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
               child: Container(
                 height: 36, // Reduced height
                 decoration: BoxDecoration(
-                  color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+                  // Effetto vetro semi-trasparente opaco
+                  color: theme.brightness == Brightness.dark 
+                      ? Colors.white.withOpacity(0.15) 
+                      : Colors.white.withOpacity(0.25),
                   borderRadius: BorderRadius.circular(30),
+                  // Bordo con effetto vetro più sottile
+                  border: Border.all(
+                    color: theme.brightness == Brightness.dark 
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
+                  // Ombra per effetto profondità e vetro
                   boxShadow: [
                     BoxShadow(
                       color: theme.brightness == Brightness.dark 
-                          ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+                      spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+                      offset: const Offset(0, 10),
+                    ),
+                    // Ombra interna per effetto vetro
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark 
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
                       offset: const Offset(0, 2),
                     ),
                   ],
+                  // Gradiente più sottile per effetto vetro
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: theme.brightness == Brightness.dark 
+                        ? [
+                            Colors.white.withOpacity(0.2),
+                            Colors.white.withOpacity(0.1),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.3),
+                            Colors.white.withOpacity(0.2),
+                          ],
+                  ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(3),
@@ -1042,21 +1225,55 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+        // Effetto vetro semi-trasparente opaco
+        color: theme.brightness == Brightness.dark 
+            ? Colors.white.withOpacity(0.15) 
+            : Colors.white.withOpacity(0.25),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(25),
           bottomRight: Radius.circular(25),
         ),
+        // Bordo con effetto vetro più sottile
+        border: Border.all(
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
+        // Ombra per effetto profondità e vetro
         boxShadow: [
           BoxShadow(
             color: theme.brightness == Brightness.dark 
-                ? Colors.black.withOpacity(0.3)
-                : Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+            spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+            offset: const Offset(0, 10),
+          ),
+          // Ombra interna per effetto vetro
+          BoxShadow(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, 2),
           ),
         ],
+        // Gradiente più sottile per effetto vetro
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.brightness == Brightness.dark 
+              ? [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ]
+              : [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.2),
+                ],
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1202,23 +1419,57 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
       ),
-      color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+      color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          // Effetto vetro semi-trasparente opaco
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.15) 
+              : Colors.white.withOpacity(0.25),
+          // Bordo con effetto vetro più sottile
+          border: Border.all(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
+          // Ombra per effetto profondità e vetro
           boxShadow: [
             BoxShadow(
               color: theme.brightness == Brightness.dark 
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
-              spreadRadius: 1,
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+              spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+              offset: const Offset(0, 10),
+            ),
+            // Ombra interna per effetto vetro
+            BoxShadow(
+              color: theme.brightness == Brightness.dark 
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.white.withOpacity(0.6),
+              blurRadius: 2,
+              spreadRadius: -2,
+              offset: const Offset(0, 2),
             ),
           ],
+          // Gradiente più sottile per effetto vetro
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark 
+                ? [
+                    Colors.white.withOpacity(0.2),
+                    Colors.white.withOpacity(0.1),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.3),
+                    Colors.white.withOpacity(0.2),
+                  ],
+          ),
         ),
         child: InkWell(
           onTap: () {
@@ -1240,7 +1491,7 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
               ),
             );
           },
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1581,6 +1832,31 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
                 
                 SizedBox(height: 16),
                 
+                // See how tutorial link - semplice e poco ingombrante
+                GestureDetector(
+                  onTap: () async {
+                    // Inizializza il video se non è già inizializzato
+                    if (!_isTutorialVideoInitialized) {
+                      await _initializeTutorialVideo();
+                    }
+                    // Mostra il video in fullscreen solo se è inizializzato
+                    if (_isTutorialVideoInitialized) {
+                      _showVideoFullscreen();
+                    }
+                  },
+                  child: Text(
+                    'See how',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                
+                SizedBox(height: 16),
+                
                 // Info box
                 Container(
                   padding: EdgeInsets.all(12),
@@ -1615,31 +1891,6 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
                 
                 SizedBox(height: 24),
                 
-                // See how tutorial link - semplice e poco ingombrante
-                GestureDetector(
-                  onTap: () async {
-                    // Inizializza il video se non è già inizializzato
-                    if (!_isTutorialVideoInitialized) {
-                      await _initializeTutorialVideo();
-                    }
-                    // Mostra il video in fullscreen solo se è inizializzato
-                    if (_isTutorialVideoInitialized) {
-                      _showVideoFullscreen();
-                    }
-                  },
-                  child: Text(
-                    'See how',
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
-                
-                SizedBox(height: 24),
-                
                 // Action buttons
                 Column(
                   children: [
@@ -1665,6 +1916,32 @@ class _YouTubePageState extends State<YouTubePage> with TickerProviderStateMixin
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    // URL text that copies when tapped
+                    GestureDetector(
+                      onTap: () async {
+                        const url = 'https://www.youtube.com/verify';
+                        await Clipboard.setData(ClipboardData(text: url));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('URL copied to clipboard'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      },
+                      child: Text(
+                        'https://www.youtube.com/verify',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.blue,
+                          decoration: TextDecoration.underline,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
                     ),
                     SizedBox(height: 12),

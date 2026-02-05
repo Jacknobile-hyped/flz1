@@ -134,6 +134,9 @@ const List<String> viralTips = [
 /// 4. Thumbnail generati automaticamente per video e cached
 class PostSchedulerPage extends StatefulWidget {
   final File? videoFile;
+  // Nuove liste per supportare più media (carosello / multi-media)
+  final List<File>? mediaFiles;
+  final List<bool>? isImageFiles;
   final String? title;
   final String? description;
   final Map<String, List<String>>? selectedAccounts;
@@ -146,10 +149,13 @@ class PostSchedulerPage extends StatefulWidget {
   final String platform;
   final String? draftId; // Add draftId
   final File? youtubeThumbnailFile; // Add thumbnail param
+  final Map<String, Map<String, dynamic>>? youtubeOptions; // Opzioni YouTube per ogni account
   
   const PostSchedulerPage({
     Key? key, 
     this.videoFile,
+    this.mediaFiles,
+    this.isImageFiles,
     this.title,
     this.description,
     this.selectedAccounts,
@@ -162,6 +168,7 @@ class PostSchedulerPage extends StatefulWidget {
     required this.platform,
     this.draftId, // Add draftId
     this.youtubeThumbnailFile, // Add thumbnail param
+    this.youtubeOptions, // Opzioni YouTube per ogni account
   }) : super(key: key);
 
   @override
@@ -172,6 +179,9 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
   final TextEditingController _textController = TextEditingController();
   DateTime _scheduledDate = DateTime.now().add(const Duration(hours: 1));
   File? _mediaFile;
+  // Liste locali di media per supportare caroselli / multi-media
+  List<File> _mediaFiles = [];
+  List<bool> _isImageFiles = [];
   bool _isLoading = false;
   String? _errorMessage;
   final ImagePicker _picker = ImagePicker();
@@ -182,6 +192,8 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
   
   // Ottimizzazione caricamento Cloudflare - variabili per gestire il caricamento una sola volta
   String? _cachedCloudflareUrl; // URL Cloudflare del file caricato
+  // Nuova lista per supportare più media (carosello Instagram)
+  List<String> _cachedCloudflareUrls = [];
   String? _cachedThumbnailUrl; // URL Cloudflare del thumbnail caricato
   bool _isUploadingToCloudflare = false; // Flag per tracciare se è in corso un upload
   String _uploadStatus = ''; // Messaggio di stato per l'upload
@@ -288,8 +300,24 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       _textController.text = widget.title!;
     }
     
-    if (widget.videoFile != null) {
+    // Inizializza le liste di media (singolo file o carosello)
+    if (widget.mediaFiles != null && widget.mediaFiles!.isNotEmpty) {
+      _mediaFiles = List<File>.from(widget.mediaFiles!);
+      if (widget.isImageFiles != null && widget.isImageFiles!.isNotEmpty) {
+        _isImageFiles = List<bool>.from(widget.isImageFiles!);
+      } else {
+        // Se non vengono passati i flag, deducili dall'estensione del file
+        _isImageFiles = _mediaFiles
+            .map((f) => _determineMediaTypeFromFile(f) == 'image')
+            .toList();
+      }
+      // Usa il primo media come file principale legacy
+      _mediaFile = _mediaFiles.first;
+    } else if (widget.videoFile != null) {
+      // Retrocompatibilità: usa il singolo file
       _mediaFile = widget.videoFile;
+      _mediaFiles = [widget.videoFile!];
+      _isImageFiles = [_determineMediaTypeFromFile(widget.videoFile!) == 'image'];
     }
     
     // If description is provided but no title, use description as text
@@ -929,7 +957,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     }
     
     // Se non abbiamo un file da caricare, restituiamo null
-    if (_mediaFile == null) {
+    if (_mediaFile == null && _mediaFiles.isEmpty) {
       print('No media file to upload');
       return null;
     }
@@ -957,15 +985,16 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     });
     
     try {
-      print('Starting single upload to Cloudflare R2: ${_mediaFile!.path}');
+      final File fileToUpload = _mediaFile ?? _mediaFiles.first;
+      print('Starting single upload to Cloudflare R2: ${fileToUpload.path}');
       
       // Aggiorna il progresso per il caricamento
       _updateSchedulingProgress(65.0, 'File scheduling...');
       
       // Carica il file su Cloudflare con timeout
       final cloudflareUrl = await _uploadMediaToCloudflareR2(
-        _mediaFile!, 
-        _getContentType(_mediaFile!.path.split('.').last)
+        fileToUpload, 
+        _getContentType(fileToUpload.path.split('.').last)
       ).timeout(
         Duration(minutes: 5),
         onTimeout: () {
@@ -975,6 +1004,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Cachea l'URL
       _cachedCloudflareUrl = cloudflareUrl;
+      _cachedCloudflareUrls = [cloudflareUrl];
       
       // Se è un video, genera e carica anche il thumbnail
       final mediaType = _determineMediaType(cloudflareUrl);
@@ -1014,7 +1044,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     } catch (e) {
       print('Error uploading file to Cloudflare: $e');
       setState(() {
-        _uploadStatus = 'Errore nel caricamento: $e';
+        _uploadStatus = 'Upload error: $e';
       });
       throw e;
     } finally {
@@ -1058,8 +1088,10 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     print('Multiple platforms detected: ${platformsRequiringCloudflare.join(', ')}');
     print('Preparing optimized upload for all platforms...');
     
-    // Carica il file una sola volta per tutte le piattaforme
-    if (_mediaFile != null || widget.cloudflareUrl != null) {
+    // Carica il file o i file (in caso di carosello) una sola volta per tutte le piattaforme
+    if (_mediaFiles.isNotEmpty || _mediaFile != null || widget.cloudflareUrl != null) {
+      // Per ora ottimizziamo l'upload principale; i media extra verranno gestiti
+      // solo dove servono (es. carosello Instagram)
       await _uploadFileToCloudflareOnce();
       print('File uploaded once and cached for all platforms');
     }
@@ -1197,6 +1229,13 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
             }
           }
           
+          // Ottieni lista di media URLs se disponibile (per caroselli)
+          List<String>? mediaUrls;
+          if (_cachedCloudflareUrls.isNotEmpty) {
+            mediaUrls = _cachedCloudflareUrls;
+            print('📸 [MULTI_PLATFORM] Media URLs disponibili: ${mediaUrls.length}');
+          }
+          
           await _saveMultiPlatformPostToFirebase(
             currentUser.uid,
             postText,
@@ -1207,6 +1246,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
             accountResults,
             globalUniquePostId, // Usa l'ID globale
             videoDuration, // Aggiungi durata del video
+            mediaUrls, // Aggiungi lista di media URLs per caroselli
           );
         }
       }
@@ -1273,7 +1313,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Aggiorna il progresso dopo il completamento
       double newProgress = 30.0 + (_completedPlatforms * (60.0 / _totalPlatforms));
-      _updateSchedulingProgress(newProgress, '$platform schedulato con successo');
+      _updateSchedulingProgress(newProgress, '$platform scheduled successfully');
       
       print('$platform scheduled successfully');
       
@@ -1286,7 +1326,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Aggiorna il progresso anche in caso di errore
       double newProgress = 30.0 + (_completedPlatforms * (60.0 / _totalPlatforms));
-      _updateSchedulingProgress(newProgress, 'Errore in $platform, continuando...');
+      _updateSchedulingProgress(newProgress, 'Error in $platform, continuing...');
       
       // Non rilanciare l'errore per permettere alle altre piattaforme di continuare
       // L'errore verrà gestito nel metodo chiamante
@@ -1328,7 +1368,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Aggiorna il progresso dopo il completamento
       double newProgress = 30.0 + (_completedPlatforms * (60.0 / _totalPlatforms));
-      _updateSchedulingProgress(newProgress, '$platform schedulato con successo');
+      _updateSchedulingProgress(newProgress, '$platform scheduled successfully');
       
       print('$platform scheduled successfully with result collected');
       
@@ -1341,7 +1381,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Aggiorna il progresso anche in caso di errore
       double newProgress = 30.0 + (_completedPlatforms * (60.0 / _totalPlatforms));
-      _updateSchedulingProgress(newProgress, 'Errore in $platform, continuando...');
+      _updateSchedulingProgress(newProgress, 'Error in $platform, continuing...');
       
       // Non rilanciare l'errore per permettere alle altre piattaforme di continuare
       // L'errore verrà gestito nel metodo chiamante
@@ -1436,6 +1476,14 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
         final responseData = jsonDecode(response.body);
         print('$platform post scheduled successfully, ID: ${responseData['id']}');
         // Salva su Firebase
+        // Ottieni mediaUrls se disponibile (per caroselli)
+        List<String>? mediaUrls;
+        if (dataPerAccount['media_urls'] != null && dataPerAccount['media_urls'] is List) {
+          mediaUrls = List<String>.from(dataPerAccount['media_urls']);
+        } else if (_cachedCloudflareUrls.isNotEmpty) {
+          mediaUrls = _cachedCloudflareUrls;
+        }
+        
         await _saveScheduledPostToFirebase(
           currentUser.uid,
           accId,
@@ -1452,6 +1500,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
           dataPerAccount['uniquePostId'],
           dataPerAccount['videoDuration'],
           null,
+          mediaUrls, // Aggiungi lista di media URLs per caroselli
         );
       }
       return;
@@ -1473,6 +1522,14 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     final responseData = jsonDecode(response.body);
     print('$platform post scheduled successfully, ID: ${responseData['id']}');
     // Salva su Firebase
+    // Ottieni mediaUrls se disponibile (per caroselli)
+    List<String>? mediaUrls;
+    if (schedulerData['media_urls'] != null && schedulerData['media_urls'] is List) {
+      mediaUrls = List<String>.from(schedulerData['media_urls']);
+    } else if (_cachedCloudflareUrls.isNotEmpty) {
+      mediaUrls = _cachedCloudflareUrls;
+    }
+    
     await _saveScheduledPostToFirebase(
       currentUser.uid,
       accountId,
@@ -1489,6 +1546,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       schedulerData['uniquePostId'],
       schedulerData['videoDuration'],
       null,
+      mediaUrls, // Aggiungi lista di media URLs per caroselli
     );
   }
   
@@ -1614,17 +1672,76 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     print('socialAccounts: ' + (widget.socialAccounts?.map((k,v) => MapEntry(k, v.map((a) => a['id']).toList())).toString() ?? 'null'));
     // Ottieni URL media se necessario
     String? mediaUrl;
+    List<String> mediaUrls = [];
     String? thumbnailUrl;
     String mediaType = 'text';
     
-    if (_mediaFile != null || widget.cloudflareUrl != null) {
+    final bool hasMultipleMedia = _mediaFiles.length > 1;
+    
+    if (_mediaFile != null || widget.cloudflareUrl != null || _mediaFiles.isNotEmpty) {
       // Determine media type from the original file first
       if (_mediaFile != null) {
         mediaType = _determineMediaTypeFromFile(_mediaFile!);
       } else if (widget.cloudflareUrl != null) {
         mediaType = _determineMediaType(widget.cloudflareUrl);
+      } else if (_mediaFiles.isNotEmpty) {
+        mediaType = _determineMediaTypeFromFile(_mediaFiles.first);
       }
       
+      // Gestione carosello Instagram: più media -> lista di URL (media_urls)
+      if (platform == 'Instagram' && hasMultipleMedia && _mediaFiles.isNotEmpty) {
+        print('📸 [INSTAGRAM] Preparing multiple media for Instagram carousel scheduling...');
+        mediaUrls = [];
+        final int maxItems = math.min(10, _mediaFiles.length);
+        for (int i = 0; i < maxItems; i++) {
+          final File file = _mediaFiles[i];
+          final String ext = file.path.split('.').last;
+          final bool isImage = _determineMediaTypeFromFile(file) == 'image';
+          
+          try {
+            String? finalUrl;
+            
+            if (isImage) {
+              // Resize image for Instagram aspect ratio, then upload
+              print('📸 [INSTAGRAM] Resizing carousel image index=$i for Instagram...');
+              final resizedImageFile = await _resizeImageForInstagram(file);
+              if (resizedImageFile != null) {
+                final resizedImageUrl = await _uploadResizedImageToCloudflare(resizedImageFile);
+                if (resizedImageUrl != null) {
+                  finalUrl = resizedImageUrl;
+                  print('📸 [INSTAGRAM] Using resized image URL for carousel index=$i: $finalUrl');
+                }
+              }
+            }
+            
+            // Se non siamo riusciti a fare il resize o non è un'immagine, usa l'upload standard
+            if (finalUrl == null) {
+              finalUrl = await _uploadMediaToCloudflareR2(
+                file,
+                _getContentType(ext),
+              );
+            }
+            
+            if (finalUrl != null) {
+              mediaUrls.add(finalUrl);
+            }
+          } catch (error) {
+            print('❌ [INSTAGRAM] Error processing carousel media index=$i: $error');
+          }
+        }
+        
+        if (mediaUrls.isNotEmpty) {
+          // Prima URL usata come mediaUrl legacy
+          mediaUrl = mediaUrls.first;
+          _cachedCloudflareUrl = mediaUrl;
+          _cachedCloudflareUrls = mediaUrls;
+          print('📸 [INSTAGRAM] Carousel media URLs prepared: count=${mediaUrls.length}');
+        } else {
+          // Fallback: prova comunque l'upload singolo
+          mediaUrl = await _uploadFileToCloudflareOnce();
+        }
+      } else {
+        // Gestione standard (singolo media o piattaforme non-Instagram)
       // Special handling for Instagram images - resize to compatible aspect ratio
       if (platform == 'Instagram' && mediaType == 'image' && _mediaFile != null) {
         print('📸 [INSTAGRAM] Processing image for Instagram aspect ratio requirements...');
@@ -1657,6 +1774,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       } else {
         // For non-Instagram platforms or non-images, use original upload
         mediaUrl = await _uploadFileToCloudflareOnce();
+        }
       }
       
       thumbnailUrl = _getCachedThumbnailUrl();
@@ -1765,10 +1883,11 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     print('📋 [SCHEDULER_DATA] - Username: ${schedulerData['username']}');
     print('📋 [SCHEDULER_DATA] - Unique Post ID: ${schedulerData['uniquePostId']}');
     print('📋 [SCHEDULER_DATA] - Media URL: ${schedulerData['mediaUrl'] ?? 'Nessuno'}');
+    print('📋 [SCHEDULER_DATA] - Media URLs (carousel): ${schedulerData['media_urls'] ?? 'Nessuno'}');
     print('📋 [SCHEDULER_DATA] - Media Type: ${schedulerData['mediaType'] ?? 'Nessuno'}');
     
     // Aggiungi dati media se disponibili
-    if (mediaUrl != null) {
+    if (mediaUrl != null || mediaUrls.isNotEmpty) {
       // Fallback: per i contenuti immagine non generiamo una thumbnail separata.
       // In questo caso usiamo direttamente la stessa URL come thumbnail.
       String? effectiveThumbnailUrl = thumbnailUrl;
@@ -1778,6 +1897,10 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
 
       schedulerData['mediaUrl'] = mediaUrl;
       schedulerData['mediaType'] = mediaType;
+      // Lista completa di URL per caroselli (es. Instagram)
+      if (mediaUrls.isNotEmpty) {
+        schedulerData['media_urls'] = mediaUrls;
+      }
       if (effectiveThumbnailUrl != null) {
         schedulerData['thumbnailUrl'] = effectiveThumbnailUrl;
       }
@@ -2136,7 +2259,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       }
       // --- FINE MODIFICA ---
       // Per altri casi (un solo account), usa la logica worker esistente
-      _updateSchedulingProgress(20.0, 'Verificando connessione worker...');
+      _updateSchedulingProgress(20.0, 'Checking worker connection...');
       print('Verifying connection to ${widget.platform} worker...');
       final workerUrl = widget.platform == 'Twitter' ? _twitterWorkerUrl : widget.platform == 'Instagram' ? _instagramWorkerUrl : widget.platform == 'Facebook' ? _facebookWorkerUrl : widget.platform == 'Threads' ? _threadsWorkerUrl : _tiktokWorkerUrl;
       final isWorkerReachable = await _checkWorkerConnection(workerUrl).timeout(
@@ -2150,7 +2273,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       if (!isWorkerReachable) {
         throw Exception('${widget.platform} scheduler worker is not reachable. Please try again later.');
       }
-      _updateSchedulingProgress(30.0, 'Recuperando dati account...');
+      _updateSchedulingProgress(30.0, 'Retrieving account data...');
       print('Retrieving ${widget.platform} account data: $_selectedAccountId');
       String databasePath;
       if (widget.platform == 'Instagram') {
@@ -2315,7 +2438,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       }
       final responseData = jsonDecode(response.body);
       print('Post scheduled successfully, ID: ${responseData['id']}');
-      _updateSchedulingProgress(95.0, 'Salvando dati...');
+      _updateSchedulingProgress(95.0, 'Saving data...');
       print('💾 [FIREBASE_SAVE] ==================== SALVATAGGIO SU FIREBASE ====================');
       print('💾 [FIREBASE_SAVE] User ID: ${currentUser.uid}');
       print('💾 [FIREBASE_SAVE] Account ID: $_selectedAccountId');
@@ -2331,6 +2454,14 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       // Per immagini, se la thumbnail manca, usa mediaUrl
       if (savedThumbnailUrl == null && savedMediaUrl != null && savedMediaType == 'image') {
         savedThumbnailUrl = savedMediaUrl;
+      }
+
+      // Ottieni mediaUrls se disponibile (per caroselli)
+      List<String>? mediaUrls;
+      if (schedulerData['media_urls'] != null && schedulerData['media_urls'] is List) {
+        mediaUrls = List<String>.from(schedulerData['media_urls']);
+      } else if (_cachedCloudflareUrls.isNotEmpty) {
+        mediaUrls = _cachedCloudflareUrls;
       }
 
       await _saveScheduledPostToFirebase(
@@ -2349,8 +2480,9 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
         singleUniquePostId, // PASSA L'ID UNIVOCO
         schedulerData['videoDuration'], // Aggiungo la durata del video
         null, // Aggiungo il parametro title (null per piattaforme non-YouTube)
+        mediaUrls, // Aggiungi lista di media URLs per caroselli
       );
-      _updateSchedulingProgress(100.0, 'Scheduling completato con successo!');
+      _updateSchedulingProgress(100.0, 'Scheduling completed successfully!');
       print('Scheduling completed successfully');
       if (widget.onSchedulingComplete != null) {
         print('Calling onSchedulingComplete callback');
@@ -2387,19 +2519,18 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       setState(() {
         _platformSchedulingStatus['YouTube'] = false;
         _platformErrors['YouTube'] = null;
-        _schedulingStatus = 'Preparazione del video per YouTube...';
+        _schedulingStatus = 'Preparing video for YouTube...';
       });
       
-      // Validate scheduling date - must be at least 15 minutes in the future
+      // Validate scheduling date - must be in the future
       final now = DateTime.now();
-      final minScheduleTime = now.add(Duration(minutes: 15));
       
-      if (_scheduledDate.isBefore(minScheduleTime)) {
+      if (_scheduledDate.isBefore(now)) {
         setState(() {
-          _platformErrors['YouTube'] = 'The publication date must be at least 15 minutes in the future.';
+          _platformErrors['YouTube'] = 'The publication date must be in the future.';
           _platformSchedulingStatus['YouTube'] = false;
         });
-        throw Exception('The publication date must be at least 15 minutes in the future.');
+        throw Exception('The publication date must be in the future.');
       }
       
       // Get account data from Firebase
@@ -2436,7 +2567,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // Update status for account-specific scheduling
       setState(() {
-        _schedulingStatus = 'Programmazione su canale ${accountData['username']}';
+        _schedulingStatus = 'Scheduling on channel ${accountData['username']}';
       });
       
       // Get platform-specific description if available
@@ -2476,7 +2607,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       if (_mediaFile != null) {
         setState(() {
-          _schedulingStatus = 'Caricamento video su Cloudflare...';
+          _schedulingStatus = 'Uploading video to Cloudflare...';
         });
         
         print('YouTube: Uploading video to Cloudflare for consistency with other platforms');
@@ -2489,7 +2620,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
           final mediaType = _determineMediaType(cloudflareUrl);
           if (mediaType == 'video') {
             setState(() {
-              _schedulingStatus = 'Generazione thumbnail...';
+              _schedulingStatus = 'Generating thumbnail...';
             });
             
             // Usa il thumbnail cached se disponibile
@@ -2530,18 +2661,31 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // FASE 2: Upload su YouTube usando il file locale (per prestazioni ottimali)
       setState(() {
-        _schedulingStatus = 'Upload su YouTube...';
+        _schedulingStatus = 'Uploading to YouTube...';
       });
       
       String? videoId;
       if (_mediaFile != null) {
         print('YouTube: Using local file for direct upload to YouTube (optimal performance)');
+        // Get YouTube options for this account, with defaults
+        final youtubeOptions = widget.youtubeOptions?[_selectedAccountId!] ?? {
+          'categoryId': '22',
+          'privacyStatus': 'private', // Per scheduling deve essere private
+          'license': 'youtube',
+          'notifySubscribers': true,
+          'embeddable': true,
+          'madeForKids': false,
+        };
+        // Override privacyStatus to 'private' for scheduling
+        youtubeOptions['privacyStatus'] = 'private';
+        
         videoId = await youtubeService.uploadScheduledVideoWithSavedAccount(
           videoFile: _mediaFile!,
           title: videoTitle,
           description: videoDescription,
           publishAt: _scheduledDate,
           accountId: _selectedAccountId!,
+          youtubeOptions: youtubeOptions,
         );
       }
       
@@ -2572,12 +2716,12 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
           if (fileSize > 2 * 1024 * 1024) {
             print('***YOUTUBE THUMBNAIL ERROR***: Thumbnail file exceeds 2MB, cannot upload.');
             setState(() {
-              _schedulingStatus = 'Thumbnail troppo grande (>2MB), non caricata!';
+              _schedulingStatus = 'Thumbnail too large (>2MB), not uploaded!';
             });
           } else if (!(mimeType == 'image/jpeg' || mimeType == 'image/png')) {
             print('***YOUTUBE THUMBNAIL ERROR***: Thumbnail must be JPEG or PNG.');
             setState(() {
-              _schedulingStatus = 'Thumbnail deve essere JPEG o PNG!';
+              _schedulingStatus = 'Thumbnail must be JPEG or PNG!';
             });
           } else {
             // Ottieni il token di accesso per YouTube usando GoogleSignIn
@@ -2608,7 +2752,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
                   
                   if (thumbnailResponse.statusCode == 200) {
                     setState(() {
-                      _schedulingStatus = 'Thumbnail personalizzata caricata con successo!';
+                      _schedulingStatus = 'Custom thumbnail uploaded successfully!';
                     });
                     print('Custom thumbnail uploaded successfully to YouTube!');
                   } else {
@@ -2648,12 +2792,13 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       setState(() {
         _platformSchedulingStatus['YouTube'] = true;
         _platformErrors['YouTube'] = null;
-        _schedulingStatus = 'Video programmato con successo su YouTube';
+        _schedulingStatus = 'Video scheduled successfully on YouTube';
         _completedPlatforms++;
       });
       
       // Save the scheduled post to Firebase for tracking
       print('Saving YouTube scheduled post to Firebase');
+      // Per YouTube non ci sono caroselli, quindi mediaUrls è null
       await _saveScheduledPostToFirebase(
         currentUser.uid,
         _selectedAccountId!,
@@ -2671,6 +2816,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
         null, // Per YouTube, la durata del video viene gestita diversamente
         // AGGIUNTA: Passa anche il titolo personalizzato
         videoTitle,
+        null, // YouTube non supporta caroselli, quindi mediaUrls è null
       );
       
       // Show success message and navigate back
@@ -2712,19 +2858,18 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       setState(() {
         _platformSchedulingStatus['YouTube'] = false;
         _platformErrors['YouTube'] = null;
-        _schedulingStatus = 'Preparazione del video per YouTube...';
+        _schedulingStatus = 'Preparing video for YouTube...';
       });
       
-      // Validate scheduling date - must be at least 15 minutes in the future
+      // Validate scheduling date - must be in the future
       final now = DateTime.now();
-      final minScheduleTime = now.add(Duration(minutes: 15));
       
-      if (_scheduledDate.isBefore(minScheduleTime)) {
+      if (_scheduledDate.isBefore(now)) {
         setState(() {
-          _platformErrors['YouTube'] = 'The publication date must be at least 15 minutes in the future.';
+          _platformErrors['YouTube'] = 'The publication date must be in the future.';
           _platformSchedulingStatus['YouTube'] = false;
         });
-        throw Exception('The publication date must be at least 15 minutes in the future.');
+        throw Exception('The publication date must be in the future.');
       }
       
       // Get account data from Firebase
@@ -2796,7 +2941,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       if (_mediaFile != null) {
         setState(() {
-          _schedulingStatus = 'Caricamento video su Cloudflare...';
+          _schedulingStatus = 'Uploading video to Cloudflare...';
         });
         
         print('YouTube: Uploading video to Cloudflare for consistency with other platforms');
@@ -2809,7 +2954,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
           final mediaType = _determineMediaType(cloudflareUrl);
           if (mediaType == 'video') {
             setState(() {
-              _schedulingStatus = 'Generazione thumbnail...';
+              _schedulingStatus = 'Generating thumbnail...';
             });
             
             // Usa il thumbnail cached se disponibile
@@ -2846,18 +2991,31 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
       
       // FASE 2: Upload su YouTube usando il file locale (per prestazioni ottimali)
       setState(() {
-        _schedulingStatus = 'Upload su YouTube...';
+        _schedulingStatus = 'Uploading to YouTube...';
       });
       
       String? videoId;
       if (_mediaFile != null) {
         print('YouTube: Using local file for direct upload to YouTube (optimal performance)');
+        // Get YouTube options for this account, with defaults
+        final youtubeOptions = widget.youtubeOptions?[_selectedAccountId!] ?? {
+          'categoryId': '22',
+          'privacyStatus': 'private', // Per scheduling deve essere private
+          'license': 'youtube',
+          'notifySubscribers': true,
+          'embeddable': true,
+          'madeForKids': false,
+        };
+        // Override privacyStatus to 'private' for scheduling
+        youtubeOptions['privacyStatus'] = 'private';
+        
         videoId = await youtubeService.uploadScheduledVideoWithSavedAccount(
           videoFile: _mediaFile!,
           title: videoTitle,
           description: videoDescription,
           publishAt: _scheduledDate,
           accountId: _selectedAccountId!,
+          youtubeOptions: youtubeOptions,
         );
       }
       
@@ -2884,12 +3042,12 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
           if (fileSize > 2 * 1024 * 1024) {
             print('***YOUTUBE THUMBNAIL ERROR***: Thumbnail file exceeds 2MB, cannot upload.');
             setState(() {
-              _schedulingStatus = 'Thumbnail troppo grande (>2MB), non caricata!';
+              _schedulingStatus = 'Thumbnail too large (>2MB), not uploaded!';
             });
           } else if (!(mimeType == 'image/jpeg' || mimeType == 'image/png')) {
             print('***YOUTUBE THUMBNAIL ERROR***: Thumbnail must be JPEG or PNG.');
             setState(() {
-              _schedulingStatus = 'Thumbnail deve essere JPEG o PNG!';
+              _schedulingStatus = 'Thumbnail must be JPEG or PNG!';
             });
           } else {
             // Ottieni il token di accesso per YouTube usando GoogleSignIn
@@ -2920,7 +3078,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
                   
                   if (thumbnailResponse.statusCode == 200) {
                     setState(() {
-                      _schedulingStatus = 'Thumbnail personalizzata caricata con successo!';
+                      _schedulingStatus = 'Custom thumbnail uploaded successfully!';
                     });
                     print('Custom thumbnail uploaded successfully to YouTube!');
                   } else {
@@ -3464,6 +3622,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     String? uniquePostId, // Aggiungo il parametro per l'ID univoco
     Map<String, int>? videoDuration, // Aggiungo il parametro per la durata del video
     String? title, // Aggiungo il parametro per il titolo personalizzato
+    List<String>? mediaUrls, // Aggiungo il parametro per la lista di media URLs (caroselli)
   ) async {
     try {
       print('🔥 [FIREBASE_SAVE_INTERNAL] Inizio salvataggio su Firebase:');
@@ -3544,6 +3703,17 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
         print('🔥 [FIREBASE_SAVE_INTERNAL] Video duration added: ${videoDuration['total_seconds']} seconds');
       }
       
+      // Aggiungi lista di media URLs se disponibile (per caroselli)
+      if (mediaUrls != null && mediaUrls.isNotEmpty) {
+        // Salva come oggetto con indici numerici per Firebase
+        Map<String, String> mediaUrlsMap = {};
+        for (int i = 0; i < mediaUrls.length; i++) {
+          mediaUrlsMap[i.toString()] = mediaUrls[i];
+        }
+        postData['media_urls'] = mediaUrlsMap;
+        print('📸 [FIREBASE_SAVE_INTERNAL] Media URLs salvati: ${mediaUrls.length} URL');
+      }
+      
       // Aggiungi titolo e descrizione personalizzati se disponibili
       if (customTitle != null) {
         postData['title'] = customTitle;
@@ -3604,6 +3774,7 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
     Map<String, Map<String, dynamic>> accountResults, // Map<uniqueKey, Map<accountId, resultData>>
     String? uniquePostId, // Aggiungo il parametro per l'ID univoco
     Map<String, int>? videoDuration, // Aggiungo il parametro per la durata del video
+    List<String>? mediaUrls, // Aggiungo il parametro per la lista di media URLs (caroselli)
   ) async {
     try {
       print('Saving multi-platform post to Firebase with ${accountResults.length} accounts');
@@ -3716,6 +3887,17 @@ class _PostSchedulerPageState extends State<PostSchedulerPage> with TickerProvid
         postData['video_duration_minutes'] = videoDuration['minutes'];
         postData['video_duration_remaining_seconds'] = videoDuration['seconds'];
         print('🔥 [MULTI_PLATFORM_FIREBASE] Video duration added: ${videoDuration['total_seconds']} seconds');
+      }
+      
+      // Aggiungi lista di media URLs se disponibile (per caroselli)
+      if (mediaUrls != null && mediaUrls.isNotEmpty) {
+        // Salva come oggetto con indici numerici per Firebase
+        Map<String, String> mediaUrlsMap = {};
+        for (int i = 0; i < mediaUrls.length; i++) {
+          mediaUrlsMap[i.toString()] = mediaUrls[i];
+        }
+        postData['media_urls'] = mediaUrlsMap;
+        print('📸 [MULTI_PLATFORM_FIREBASE] Media URLs salvati: ${mediaUrls.length} URL');
       }
       
       await postRef.set(postData);

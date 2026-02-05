@@ -3106,36 +3106,6 @@ class _FullscreenPostViewState extends State<_FullscreenPostView> with SingleTic
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Platform and date info - positioned higher when description is empty
-                      if (description.isEmpty && !isScheduled)
-                        Row(
-                          children: [
-                            _buildPlatformLogo(widget.platform),
-                            SizedBox(width: 10),
-                            Text(
-                              widget.formatTimestamp(
-                                DateTime.fromMillisecondsSinceEpoch(
-                                  publishedAt ?? _getVideoTimestamp(video)
-                                ),
-                                false
-                              ),
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                shadows: [
-                                  Shadow(
-                                    offset: Offset(1, 1),
-                                    blurRadius: 3,
-                                    color: Colors.black.withOpacity(0.5),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Spacer(),
-                          ],
-                        ),
-                      
                       // Title with shadow for better readability - only for YouTube
                       if (title.isNotEmpty && widget.platform.toLowerCase() == 'youtube')
                         Text(
@@ -3285,24 +3255,60 @@ class _FullscreenPostViewState extends State<_FullscreenPostView> with SingleTic
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (hasVideo) ...[
-                        // Time indicators
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              children: [
-                                Text(
-                                  "${_formatDuration(currentPosition)} / ${_formatDuration(duration)}",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                            if (description.isEmpty)
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    _buildPlatformLogo(widget.platform),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        widget.formatTimestamp(
+                                          DateTime.fromMillisecondsSinceEpoch(
+                                            isScheduled
+                                                ? (video['scheduled_time'] as int? ?? 0)
+                                                : (publishedAt ?? _getVideoTimestamp(video)),
+                                          ),
+                                          isScheduled,
+                                        ),
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          shadows: [
+                                            Shadow(
+                                              offset: Offset(1, 1),
+                                              blurRadius: 3,
+                                              color: Colors.black.withOpacity(0.5),
+                                            ),
+                                          ],
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                            // View Details button - for published videos
+                              )
+                            else if (hasVideo)
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      "${_formatDuration(currentPosition)} / ${_formatDuration(duration)}",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              const Spacer(),
                             if (!isScheduled)
                               GestureDetector(
                                 onTap: () {
@@ -3351,13 +3357,10 @@ class _FullscreenPostViewState extends State<_FullscreenPostView> with SingleTic
                                   ),
                                 ),
                               ),
-                            
-                            // Scheduled post details button - only for scheduled videos
                             if (isScheduled)
                               GestureDetector(
                                 onTap: () {
                                   _pauseCurrentVideo();
-                                  // Navigate to scheduled post details page
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -3402,43 +3405,43 @@ class _FullscreenPostViewState extends State<_FullscreenPostView> with SingleTic
                                   ),
                                 ),
                               ),
-                    ],
-                  ),
-                        SizedBox(height: 8),
-                        // Interactive slider with theme colors
-                        SliderTheme(
-                          data: SliderThemeData(
-                            trackHeight: 4,
-                            activeTrackColor: Colors.white,
-                            inactiveTrackColor: Colors.white.withOpacity(0.3),
-                            thumbColor: Colors.white,
-                            thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                            overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
-                          ),
-                          child: Slider(
-                            value: currentPosition.inMilliseconds.toDouble(),
-                            min: 0.0,
-                            max: duration.inMilliseconds > 0 
-                                ? duration.inMilliseconds.toDouble() 
-                                : 1.0,
-                            onChanged: (value) {
-                              if (videoController != null) {
-                                setState(() {
-                                  _isDraggingProgressBar = true;
-                                  _currentPositions[index] = Duration(milliseconds: value.round());
-                                });
-                              }
-                            },
-                            onChangeEnd: (value) {
-                              if (videoController != null) {
-                                videoController.seekTo(Duration(milliseconds: value.round()));
-                                setState(() {
-                                  _isDraggingProgressBar = false;
-                                });
-                              }
-                            },
-                          ),
+                          ],
                         ),
+                        if (hasVideo) ...[
+                          SizedBox(height: 8),
+                          SliderTheme(
+                            data: SliderThemeData(
+                              trackHeight: 4,
+                              activeTrackColor: Colors.white,
+                              inactiveTrackColor: Colors.white.withOpacity(0.3),
+                              thumbColor: Colors.white,
+                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                              overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
+                            ),
+                            child: Slider(
+                              value: currentPosition.inMilliseconds.toDouble(),
+                              min: 0.0,
+                              max: duration.inMilliseconds > 0 
+                                  ? duration.inMilliseconds.toDouble() 
+                                  : 1.0,
+                              onChanged: (value) {
+                                if (videoController != null) {
+                                  setState(() {
+                                    _isDraggingProgressBar = true;
+                                    _currentPositions[index] = Duration(milliseconds: value.round());
+                                  });
+                                }
+                              },
+                              onChangeEnd: (value) {
+                                if (videoController != null) {
+                                  videoController.seekTo(Duration(milliseconds: value.round()));
+                                  setState(() {
+                                    _isDraggingProgressBar = false;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
                         ],
                       ],
                     ),

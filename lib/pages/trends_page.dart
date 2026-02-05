@@ -219,13 +219,15 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final List<String>? suggestedQuestions; // Domande suggerite per questo messaggio
+  final String id;
 
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
+    String? id,
     this.suggestedQuestions,
-  });
+  }) : id = id ?? '${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(1 << 32)}';
 }
 
 class FirebaseTrendData {
@@ -314,6 +316,11 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
   // Typing animation controller
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
+  
+  // Set to track which trend indices have completed their typing animation
+  Set<int> _completedTypingAnimations = {};
+  // Set to track AI chat messages that completed their typing animation
+  final Set<String> _completedAIMessageAnimations = {};
 
   // AI Chat variables
   List<ChatMessage> _chatMessages = [];
@@ -363,6 +370,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
     
     // Reset dei messaggi della chat quando si riapre la pagina
     _chatMessages.clear();
+    _completedAIMessageAnimations.clear();
 
     // Initialize platform dropdown animation
     _platformAnimationController = AnimationController(
@@ -412,6 +420,13 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
       parent: _typingAnimationController,
       curve: Curves.easeInOut,
     );
+    
+    // Add listener to track when typing animation completes for current index
+    _typingAnimationController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _completedTypingAnimations.add(_currentTrendIndex);
+      }
+    });
   }
 
   @override
@@ -722,13 +737,22 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                                   _viewsChartAnimationController.reset();
                                   _engagementChartAnimationController.reset();
                                   _viralityScoreAnimationController.reset();
-                                  _typingAnimationController.reset();
+                                  
+                                  // Only reset typing animation if it hasn't been completed for this index
+                                  if (!_completedTypingAnimations.contains(index)) {
+                                    _typingAnimationController.reset();
+                                    _typingAnimationController.forward();
+                                  } else {
+                                    // If animation already completed, set it to completed state
+                                    _typingAnimationController.forward();
+                                  }
+                                  
                                   _viewsChartAnimationController.forward();
                                   _engagementChartAnimationController.forward();
                                   _viralityScoreAnimationController.forward();
-                                  _typingAnimationController.forward();
                                   // Reset dei messaggi della chat quando si cambia trend
                                   _chatMessages.clear();
+                                  _completedAIMessageAnimations.clear();
                                 },
                                 itemBuilder: (context, index) {
                                   final trend = filteredTrends[index];
@@ -783,14 +807,19 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                                                 ],
                                               ),
                                               SizedBox(height: 8),
-                                              TypingTextWidget(
-                                                text: trend.description,
-                                                animation: _typingAnimation,
-                                                overflow: TextOverflow.visible,
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
-                                                  height: 1.5,
+                                              // Description with typing animation - fixed height container
+                                              Container(
+                                                height: 60, // Fixed height for 3 lines (14px font + line height ~20px each)
+                                                child: TypingTextWidget(
+                                                  text: trend.description,
+                                                  animation: _typingAnimation,
+                                                  isCompleted: _completedTypingAnimations.contains(index),
+                                                  overflow: TextOverflow.visible,
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
+                                                    height: 1.5,
+                                                  ),
                                                 ),
                                               ),
                                             ],
@@ -1933,6 +1962,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
           ? TypingTextWidget(
               text: content,
               animation: _typingAnimation,
+              isCompleted: _completedTypingAnimations.contains(_currentTrendIndex),
               overflow: TextOverflow.visible,
               style: TextStyle(
                 fontSize: 15,
@@ -2622,13 +2652,18 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
             _viewsChartAnimationController.reset();
             _engagementChartAnimationController.reset();
             _viralityScoreAnimationController.reset();
+            
+            // Reset completed animations when platform changes
+            _completedTypingAnimations.clear();
             _typingAnimationController.reset();
+            _typingAnimationController.forward();
+            
             _viewsChartAnimationController.forward();
             _engagementChartAnimationController.forward();
             _viralityScoreAnimationController.forward();
-            _typingAnimationController.forward();
             // Reset dei messaggi della chat quando si cambia piattaforma
             _chatMessages.clear();
+            _completedAIMessageAnimations.clear();
           });
         },
       child: Container(
@@ -3432,6 +3467,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
   Future<void> _clearAllChatMessages() async {
     setState(() {
       _chatMessages.clear();
+      _completedAIMessageAnimations.clear();
       // Aggiungi il messaggio di benvenuto iniziale
       _chatMessages.add(ChatMessage(
         text: 'Hi! I can help you analyze this trend. Click the button below to get started, or ask me anything about it!',
@@ -4200,7 +4236,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                     );
                   },
                   child: Container(
-                    key: ValueKey('ai_message_${message.timestamp.millisecondsSinceEpoch}'),
+                    key: ValueKey(message.id),
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
@@ -4219,10 +4255,21 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                         ),
                       ],
                     ),
-                    child: _formatAnalysisText(
-                      message.text,
-                      isDark,
-                      Theme.of(context),
+                    child: ChatTypingAnalysisWidget(
+                      text: message.text,
+                      isCompleted: _completedAIMessageAnimations.contains(message.id),
+                      builder: (partialText) => _formatAnalysisText(
+                        partialText,
+                        isDark,
+                        Theme.of(context),
+                      ),
+                      onCompleted: () {
+                        if (!_completedAIMessageAnimations.contains(message.id) && mounted) {
+                          setState(() {
+                            _completedAIMessageAnimations.add(message.id);
+                          });
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -4518,7 +4565,10 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
         ],
         
         // Domande suggerite per i messaggi dell'IA
-        if (!message.isUser && message.suggestedQuestions != null && message.suggestedQuestions!.isNotEmpty) ...[
+        if (!message.isUser &&
+            _completedAIMessageAnimations.contains(message.id) &&
+            message.suggestedQuestions != null &&
+            message.suggestedQuestions!.isNotEmpty) ...[
           SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.only(left: 28, top: 4, bottom: 4),
@@ -4586,6 +4636,7 @@ class _TrendsPageState extends State<TrendsPage> with TickerProviderStateMixin {
                               text: _chatMessages[messageIndex].text,
                               isUser: false,
                               timestamp: _chatMessages[messageIndex].timestamp,
+                              id: _chatMessages[messageIndex].id,
                               suggestedQuestions: null,
                             );
                             // Aggiorna la tendina se è aperta
@@ -4882,6 +4933,7 @@ class TypingTextWidget extends StatelessWidget {
   final TextStyle? style;
   final int? maxLines;
   final TextOverflow overflow;
+  final bool isCompleted;
 
   const TypingTextWidget({
     Key? key,
@@ -4890,10 +4942,21 @@ class TypingTextWidget extends StatelessWidget {
     this.style,
     this.maxLines,
     this.overflow = TextOverflow.ellipsis,
+    this.isCompleted = false,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // If animation is already completed, show full text immediately
+    if (isCompleted) {
+      return Text(
+        text,
+        style: style,
+        maxLines: maxLines,
+        overflow: overflow,
+      );
+    }
+    
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
@@ -4916,4 +4979,126 @@ class AnalysisSection {
   final String title;
   final String content;
   AnalysisSection(this.title, this.content);
+}
+
+class ChatTypingAnalysisWidget extends StatefulWidget {
+  final String text;
+  final bool isCompleted;
+  final Widget Function(String partialText) builder;
+  final VoidCallback? onCompleted;
+
+  const ChatTypingAnalysisWidget({
+    Key? key,
+    required this.text,
+    required this.isCompleted,
+    required this.builder,
+    this.onCompleted,
+  }) : super(key: key);
+
+  @override
+  State<ChatTypingAnalysisWidget> createState() => _ChatTypingAnalysisWidgetState();
+}
+
+class _ChatTypingAnalysisWidgetState extends State<ChatTypingAnalysisWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _animation;
+  bool _hasCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: _calculateDuration(widget.text.length),
+    );
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+
+    _hasCompleted = widget.isCompleted || widget.text.isEmpty;
+
+    if (_hasCompleted) {
+      _controller.value = 1;
+    } else {
+      _controller.forward();
+    }
+
+    _controller.addListener(() {
+      if (mounted && !_hasCompleted) {
+        setState(() {});
+      }
+    });
+
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _notifyCompletion();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatTypingAnalysisWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.text != oldWidget.text) {
+      _controller.duration = _calculateDuration(widget.text.length);
+      _hasCompleted = widget.isCompleted || widget.text.isEmpty;
+      if (_hasCompleted) {
+        _controller.value = 1;
+        _notifyCompletion();
+      } else {
+        _controller
+          ..value = 0
+          ..forward();
+      }
+    } else if (widget.isCompleted && !_hasCompleted) {
+      _controller.value = 1;
+      _notifyCompletion();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Duration _calculateDuration(int length) {
+    const minDuration = 1200;
+    const maxDuration = 9000;
+    const perChar = 28;
+    final target = length * perChar;
+    return Duration(
+      milliseconds: max(minDuration, min(maxDuration, target)),
+    );
+  }
+
+  void _notifyCompletion() {
+    if (_hasCompleted) return;
+    _hasCompleted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.onCompleted?.call();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final progress = widget.isCompleted ? 1.0 : _animation.value;
+    final visibleChars = (widget.text.length * progress).clamp(0, widget.text.length).round();
+
+    if (visibleChars <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final partialText = widget.text.substring(0, visibleChars);
+    return widget.builder(partialText);
+  }
 }

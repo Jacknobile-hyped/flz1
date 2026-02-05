@@ -45,11 +45,11 @@ class StripeService {
   }
 
   /// Crea un Payment Intent per il primo mese
+  /// NOTA: userLocation è opzionale - la localizzazione sarà determinata dall'IP lato server
   static Future<String?> createPaymentIntent({
     required String customerEmail,
     int amount = 699, // €6.99 in centesimi
     String planType = 'monthly',
-    Map<String, dynamic>? userLocation,
   }) async {
     try {
       print('Creazione payment intent per: $customerEmail, amount: $amount');
@@ -75,7 +75,7 @@ class StripeService {
           'customer_email': customerEmail,
           'amount': finalAmount,
           'plan_type': planType,
-          'user_location': userLocation, // Passa la localizzazione per il calcolo delle tasse
+          // La localizzazione sarà determinata automaticamente dall'IP lato server
         }),
       );
 
@@ -96,11 +96,11 @@ class StripeService {
   }
 
   /// Crea un abbonamento mensile con free trial di 3 giorni
+  /// NOTA: userLocation è opzionale - la localizzazione sarà determinata dall'IP lato server
   static Future<Map<String, dynamic>?> createSubscription({
     required String customerEmail,
     String paymentMethodId = '',
     bool hasUsedTrial = false,
-    Map<String, dynamic>? userLocation,
   }) async {
     try {
       // Nota: La tassazione automatica è gestita dal worker Cloudflare
@@ -114,7 +114,7 @@ class StripeService {
           'customer_email': customerEmail,
           'payment_method_id': paymentMethodId,
           'has_used_trial': hasUsedTrial,
-          'user_location': userLocation,
+          // La localizzazione sarà determinata automaticamente dall'IP lato server
         }),
       );
 
@@ -157,11 +157,11 @@ class StripeService {
   }
 
   /// Crea un abbonamento annuale con free trial di 3 giorni
+  /// NOTA: userLocation è opzionale - la localizzazione sarà determinata dall'IP lato server
   static Future<Map<String, dynamic>?> createAnnualSubscription({
     required String customerEmail,
     String paymentMethodId = '',
     bool hasUsedTrial = false,
-    Map<String, dynamic>? userLocation,
   }) async {
     try {
       // Nota: La tassazione automatica è gestita dal worker Cloudflare
@@ -175,7 +175,7 @@ class StripeService {
           'customer_email': customerEmail,
           'payment_method_id': paymentMethodId,
           'has_used_trial': hasUsedTrial,
-          'user_location': userLocation,
+          // La localizzazione sarà determinata automaticamente dall'IP lato server
         }),
       );
 
@@ -246,17 +246,18 @@ class StripeService {
   }
 
   /// Presenta il Payment Sheet per il pagamento
+  /// NOTA: La localizzazione per la tassazione sarà determinata automaticamente dall'IP lato server
   static Future<Map<String, dynamic>?> presentPaymentSheet({
     required BuildContext context,
     required String customerEmail,
     String planType = 'monthly',
     bool hasUsedTrial = false,
-    Map<String, dynamic>? userLocation,
   }) async {
     try {
       print('Iniziando processo di pagamento per: $customerEmail');
       
       // Crea l'abbonamento appropriato in base al tipo di piano
+      // La localizzazione per la tassazione sarà determinata automaticamente dall'IP lato server
       Map<String, dynamic>? subscription;
       if (planType == 'annual') {
         print('Creando abbonamento annuale...');
@@ -264,7 +265,6 @@ class StripeService {
           customerEmail: customerEmail,
           paymentMethodId: '', // Non abbiamo ancora il payment method ID
           hasUsedTrial: hasUsedTrial,
-          userLocation: userLocation,
         );
       } else {
         print('Creando abbonamento mensile...');
@@ -272,7 +272,6 @@ class StripeService {
           customerEmail: customerEmail,
           paymentMethodId: '', // Non abbiamo ancora il payment method ID
           hasUsedTrial: hasUsedTrial,
-          userLocation: userLocation,
         );
       }
 
@@ -281,33 +280,7 @@ class StripeService {
       }
 
       print('Abbonamento creato con successo, ID: ${subscription['id']}');
-
-      // Calcola le tasse se la localizzazione è disponibile
-      Map<String, dynamic>? taxCalculation;
-      if (userLocation != null && userLocation['country'] != null) {
-        try {
-          // Determina l'importo in base al tipo di piano
-          int amount = planType == 'annual' ? 5999 : 699; // in centesimi
-          
-          taxCalculation = await calculateTax(
-            amount: amount,
-            currency: 'eur',
-            userLocation: userLocation,
-          );
-          
-          if (taxCalculation != null) {
-            print('Tasse calcolate con successo: ${taxCalculation.toString()}');
-            print('Importo totale con tasse: ${taxCalculation['amount_total']}');
-            print('Importo tasse: ${taxCalculation['tax_amount_exclusive']}');
-          } else {
-            print('Errore nel calcolo delle tasse');
-          }
-        } catch (e) {
-          print('Errore durante il calcolo delle tasse: $e');
-        }
-      } else {
-        print('Localizzazione non disponibile, impossibile calcolare le tasse');
-      }
+      print('La tassazione automatica sarà gestita da Stripe in base alla localizzazione determinata dall\'IP');
 
       // Ottieni il client secret dal payment intent dell'abbonamento
       String? clientSecret;
@@ -335,7 +308,7 @@ class StripeService {
         clientSecret = await createPaymentIntent(
           customerEmail: customerEmail,
           planType: planType,
-          userLocation: userLocation, // Passa la localizzazione per il calcolo delle tasse
+          // La localizzazione sarà determinata automaticamente dall'IP lato server
         );
         
         if (clientSecret == null) {
@@ -418,23 +391,7 @@ class StripeService {
         print('Abbonamento creato con payment_behavior: default_incomplete. Stripe gestirà automaticamente il pagamento futuro.');
       }
 
-      // Crea la transazione fiscale se il calcolo è stato completato
-      if (taxCalculation != null && taxCalculation['id'] != null) {
-        try {
-          final taxTransaction = await createTaxTransaction(
-            calculationId: taxCalculation['id'],
-            reference: paymentIntentId,
-          );
-          
-          if (taxTransaction != null) {
-            print('Transazione fiscale creata con successo: ${taxTransaction['id']}');
-          } else {
-            print('Errore nella creazione della transazione fiscale');
-          }
-        } catch (e) {
-          print('Errore durante la creazione della transazione fiscale: $e');
-        }
-      }
+      // La transazione fiscale sarà gestita automaticamente da Stripe quando il pagamento viene completato
 
       // Aggiorna il database Firebase solo se l'abbonamento è stato creato con successo
       // if (subscription != null) {
@@ -620,10 +577,10 @@ class StripeService {
   }
 
   /// Crea un abbonamento di trial senza payment method
+  /// NOTA: userLocation è opzionale - la localizzazione sarà determinata dall'IP lato server
   static Future<Map<String, dynamic>?> createTrialSubscription({
     required String customerEmail,
     String planType = 'monthly',
-    Map<String, dynamic>? userLocation,
   }) async {
     try {
       final response = await http.post(
@@ -634,7 +591,7 @@ class StripeService {
         body: jsonEncode({
           'customer_email': customerEmail,
           'plan_type': planType,
-          'user_location': userLocation,
+          // La localizzazione sarà determinata automaticamente dall'IP lato server
         }),
       );
 
@@ -801,44 +758,16 @@ class StripeService {
   }
 
   /// Calcola le tasse per un importo specifico
+  /// DEPRECATO: La tassazione è ora gestita automaticamente da Stripe in base all'IP
+  /// Questa funzione è mantenuta per compatibilità ma non è più utilizzata
   static Future<Map<String, dynamic>?> calculateTax({
     required int amount,
     required String currency,
     required Map<String, dynamic> userLocation,
     List<Map<String, dynamic>>? lineItems,
   }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$_backendUrl/calculate-tax'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'amount': amount,
-          'currency': currency,
-          'user_location': userLocation,
-          'line_items': lineItems ?? [
-            {
-              'amount': amount,
-              'reference': 'L1',
-            }
-          ],
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        print('Tasse calcolate: ${data.toString()}');
-        return data;
-      } else {
-        print('Errore nel calcolo delle tasse: ${response.statusCode}');
-        print('Risposta: ${response.body}');
-        return null;
-      }
-    } catch (e) {
-      print('Errore durante il calcolo delle tasse: $e');
-      return null;
-    }
+    print('⚠️ calculateTax è deprecato - la tassazione è ora gestita automaticamente da Stripe');
+    return null;
   }
 
   /// Crea una transazione fiscale da un calcolo

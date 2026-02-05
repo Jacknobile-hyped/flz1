@@ -6,6 +6,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'upload_video_page.dart';
 import '../services/video_trimmer_service.dart';
 
@@ -147,6 +148,7 @@ class _VideoEditorPageState extends State<VideoEditorPage> {
     super.initState();
     _currentVideoFile = widget.videoFile;
     _initializeEditor();
+    _applyEditorSystemUiStyle();
   }
 
   void _initializeEditor() {
@@ -169,6 +171,7 @@ class _VideoEditorPageState extends State<VideoEditorPage> {
 
   @override
   void dispose() {
+    _restoreDefaultSystemUiStyle();
     _controller.dispose();
     _positionUpdateTimer?.cancel();
     _progressSubscription?.cancel();
@@ -186,6 +189,30 @@ class _VideoEditorPageState extends State<VideoEditorPage> {
         });
       }
     });
+  }
+
+  void _applyEditorSystemUiStyle() {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.black,
+      statusBarBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.black,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
+  }
+
+  void _restoreDefaultSystemUiStyle() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
   }
 
   @override

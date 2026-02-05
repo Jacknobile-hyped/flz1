@@ -287,25 +287,32 @@ class _DeepLinkHandlerState extends State<_DeepLinkHandler> {
     
     // Listener globale per deep link (ora solo per altri servizi, non per pagamenti)
     _linkSubscription = AppLinks().uriLinkStream.listen((Uri? uri) async {
-      if (uri != null && !_deepLinkHandled) {
-        print('[GLOBAL DEEPLINK] Deep link intercettato: $uri');
-        
-        // Controlla se questo deep link è già stato gestito
-        final prefs = await SharedPreferences.getInstance();
-        final lastHandledLink = prefs.getString('last_handled_deep_link');
-        final currentLink = uri.toString();
-        
-        if (lastHandledLink != currentLink) {
-          // Marca il deep link come gestito
-          _deepLinkHandled = true;
-          await prefs.setString('last_handled_deep_link', currentLink);
-          
-          // Gestisci TUTTI i deep link custom viralyst://
-          if (uri.scheme == 'viralyst') {
-            print('[GLOBAL DEEPLINK] Passo a DeepLinkService: $uri');
-            DeepLinkService.handleDeepLink(uri.toString(), context);
-          }
-        }
+      if (uri == null || _deepLinkHandled) return;
+
+      // Se il widget è già stato smontato, non usare più il context
+      if (!mounted) return;
+
+      print('[GLOBAL DEEPLINK] Deep link intercettato: $uri');
+      
+      // Controlla se questo deep link è già stato gestito
+      final prefs = await SharedPreferences.getInstance();
+      final lastHandledLink = prefs.getString('last_handled_deep_link');
+      final currentLink = uri.toString();
+      
+      if (lastHandledLink == currentLink) return;
+
+      // Marca il deep link come gestito
+      _deepLinkHandled = true;
+      await prefs.setString('last_handled_deep_link', currentLink);
+      
+      // Gestisci TUTTI i deep link custom viralyst:// in un frame successivo,
+      // per evitare di modificare l'albero dei widget durante una notifica InheritedWidget
+      if (uri.scheme == 'viralyst') {
+        print('[GLOBAL DEEPLINK] Passo a DeepLinkService (post-frame): $uri');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          DeepLinkService.handleDeepLink(uri.toString(), context);
+        });
       }
     });
   }
@@ -2451,73 +2458,118 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                                         ),
                                       ),
                                       const SizedBox(height: 16),
-                                      // Apple Sign In button
-                                      SizedBox(
-                                        height: 50,
-                                        child: OutlinedButton.icon(
-                                          onPressed: isLoading ? null : _signInWithApple,
-                                          icon: Padding(
-                                            padding: const EdgeInsets.only(right: 8.0),
-                                            child: Image.asset(
-                                              'assets/loghi/LogoAppleNeroNoSfondo.png',
-                                              height: 20,
+                                      // Apple Sign In button - solo su iOS
+                                      if (Platform.isIOS)
+                                        SizedBox(
+                                          height: 50,
+                                          child: OutlinedButton.icon(
+                                            onPressed: isLoading ? null : _signInWithApple,
+                                            icon: Padding(
+                                              padding: const EdgeInsets.only(right: 8.0),
+                                              child: Image.asset(
+                                                'assets/loghi/LogoAppleNeroNoSfondo.png',
+                                                height: 20,
+                                              ),
                                             ),
-                                          ),
-                                          label: Text(
-                                            'Continue with Apple',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w500,
-                                              color: isDark ? Colors.white : Colors.black87,
+                                            label: Text(
+                                              'Continue with Apple',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                                color: isDark ? Colors.white : Colors.black87,
+                                              ),
                                             ),
-                                          ),
-                                          style: OutlinedButton.styleFrom(
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(15),
+                                            style: OutlinedButton.styleFrom(
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(15),
+                                              ),
+                                              side: BorderSide(
+                                                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                                              ),
+                                              backgroundColor: isDark ? Colors.grey[800] : Colors.white,
                                             ),
-                                            side: BorderSide(
-                                              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                                            ),
-                                            backgroundColor: isDark ? Colors.grey[800] : Colors.white,
                                           ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 24),
-                                      // Sign up/Login link
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Text(
-                                            isLogin ? 'Don\'t have an account? ' : 'Already have an account? ',
-                                            style: TextStyle(
-                                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                      
+                                      // Su Android, mostra il link "Already have an account? Login" subito dopo Google
+                                      if (Platform.isAndroid && !isLogin)
+                                        Column(
+                                          children: [
+                                            const SizedBox(height: 0),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  'Already have an account? ',
+                                                  style: TextStyle(
+                                                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed: _toggleAuthMode,
+                                                  child: ShaderMask(
+                                                    shaderCallback: (Rect bounds) {
+                                                      return LinearGradient(
+                                                        begin: Alignment.topLeft,
+                                                        end: Alignment.bottomRight,
+                                                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                                                        colors: [
+                                                          Color(0xFF667eea), // Colore iniziale: blu violaceo al 0%
+                                                          Color(0xFF764ba2), // Colore finale: viola al 100%
+                                                        ],
+                                                      ).createShader(bounds);
+                                                    },
+                                                    child: Text(
+                                                      'Login',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                          ),
-                                          TextButton(
-                                            onPressed: _toggleAuthMode,
-                                            child: ShaderMask(
-                                              shaderCallback: (Rect bounds) {
-                                                return LinearGradient(
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
-                                                  transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                                                  colors: [
-                                                    Color(0xFF667eea), // Colore iniziale: blu violaceo al 0%
-                                                    Color(0xFF764ba2), // Colore finale: viola al 100%
-                                                  ],
-                                                ).createShader(bounds);
-                                              },
-                                              child: Text(
-                                                isLogin ? 'Sign up' : 'Login',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.bold,
+                                          ],
+                                        ),
+                                      
+                                      const SizedBox(height: 24),
+                                      // Sign up/Login link - solo per iOS o per "Don't have an account?" su Android
+                                      if (Platform.isIOS || isLogin)
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              isLogin ? 'Don\'t have an account? ' : 'Already have an account? ',
+                                              style: TextStyle(
+                                                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed: _toggleAuthMode,
+                                              child: ShaderMask(
+                                                shaderCallback: (Rect bounds) {
+                                                  return LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                                                    colors: [
+                                                      Color(0xFF667eea), // Colore iniziale: blu violaceo al 0%
+                                                      Color(0xFF764ba2), // Colore finale: viola al 100%
+                                                    ],
+                                                  ).createShader(bounds);
+                                                },
+                                                child: Text(
+                                                  isLogin ? 'Sign up' : 'Login',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
+                                          ],
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -2958,7 +3010,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
   final GlobalKey<HomePageState> _homePageKey = GlobalKey<HomePageState>();
@@ -2974,6 +3026,12 @@ class _MainScreenState extends State<MainScreen> {
   Stream<DatabaseEvent>? _starsStream;
   bool? _isPremium; // null = loading
   String? _profileImageUrl; // URL dell'immagine profilo dal database
+  
+  // Controller per l'animazione del glass scorrevole
+  late AnimationController _glassAnimationController;
+  late Animation<double> _glassAnimation;
+  late Animation<double> _glassOpacityAnimation;
+  int _previousIndex = 0; // Indice precedente per l'animazione
 
   @override
   void initState() {
@@ -2982,6 +3040,7 @@ class _MainScreenState extends State<MainScreen> {
     _setupNotificationsListener();
     _setupOneSignalUser();
     _loadProfileImage();
+    _initializeGlassAnimation();
   }
 
   Future<void> _checkPremiumStatus() async {
@@ -3154,6 +3213,13 @@ class _MainScreenState extends State<MainScreen> {
       _scheduledPostsPageKey.currentState!.deactivatePage();
     }
     
+    // Avvia l'animazione del glass scorrevole solo se cambiamo pagina
+    if (index != _selectedIndex) {
+      _previousIndex = _selectedIndex;
+      _glassAnimationController.reset();
+      _glassAnimationController.forward();
+    }
+    
     setState(() {
       _selectedIndex = index;
     });
@@ -3204,8 +3270,45 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// Inizializza l'animazione del glass scorrevole
+  void _initializeGlassAnimation() {
+    _glassAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    
+    // Animazione per la posizione del glass
+    _glassAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _glassAnimationController,
+      curve: Curves.easeInOutCubic,
+    ));
+    
+    // Animazione per l'opacità (appare, rimane visibile, scompare)
+    _glassOpacityAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 0.0, end: 1.0),
+        weight: 20, // 20% del tempo per apparire
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1.0, end: 1.0),
+        weight: 60, // 60% del tempo per rimanere visibile
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1.0, end: 0.0),
+        weight: 20, // 20% del tempo per scomparire
+      ),
+    ]).animate(CurvedAnimation(
+      parent: _glassAnimationController,
+      curve: Curves.easeInOut,
+    ));
+  }
+
   @override
   void dispose() {
+    _glassAnimationController.dispose();
     // I listener si cancellano automaticamente quando il widget viene distrutto
     // Non è necessario cancellarli manualmente per Stream<DatabaseEvent>
     super.dispose();
@@ -3575,16 +3678,126 @@ class _MainScreenState extends State<MainScreen> {
         borderRadius: BorderRadius.circular(30),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildNavItem(0, Icons.home_outlined, Icons.home, theme, isDark),
-              _buildNavItem(1, Icons.account_circle_outlined, Icons.account_circle, theme, isDark),
-              _buildNavItem(2, Icons.upload_outlined, Icons.upload, theme, isDark),
-              _buildNavItem(3, Icons.history_outlined, Icons.history, theme, isDark),
-              _buildNavItem(4, Icons.schedule_outlined, Icons.schedule, theme, isDark, customSize: 20),
-              _buildNavItem(5, Icons.star_outline, Icons.star, theme, isDark),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final double maxWidth = constraints.maxWidth;
+              if (maxWidth <= 0) {
+                return const SizedBox.shrink();
+              }
+
+              const int itemCount = 6;
+              final double itemWidth = maxWidth / itemCount;
+              final double indicatorWidth = itemWidth * 0.82;
+              final double baseLeft = (itemWidth - indicatorWidth) / 2;
+              final double maxLeft = baseLeft + (itemCount - 1) * itemWidth;
+
+              return Stack(
+                children: [
+                  AnimatedBuilder(
+                    animation: _glassAnimationController,
+                    builder: (context, child) {
+                      final double animationValue = _glassAnimationController.isAnimating
+                          ? _glassAnimation.value
+                          : 1.0;
+                      final double startLeft = baseLeft + (_previousIndex * itemWidth);
+                      final double endLeft = baseLeft + (_selectedIndex * itemWidth);
+                      final double lerpedLeft = startLeft + (endLeft - startLeft) * animationValue;
+                      final double clampedLeft = lerpedLeft.clamp(baseLeft, maxLeft);
+                      final double opacity = _glassAnimationController.isAnimating
+                          ? _glassOpacityAnimation.value
+                          : 1.0;
+
+                      return Positioned(
+                        left: clampedLeft,
+                        top: 0,
+                        bottom: 0,
+                        child: Opacity(
+                          opacity: opacity,
+                          child: Container(
+                            width: indicatorWidth,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(24),
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.3)
+                                  : Colors.white.withOpacity(0.5),
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.4)
+                                    : Colors.white.withOpacity(0.7),
+                                width: 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: isDark
+                                      ? Colors.black.withOpacity(0.3)
+                                      : Colors.black.withOpacity(0.15),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: isDark
+                                    ? [
+                                        Colors.white.withOpacity(0.4),
+                                        Colors.white.withOpacity(0.2),
+                                      ]
+                                    : [
+                                        Colors.white.withOpacity(0.6),
+                                        Colors.white.withOpacity(0.4),
+                                      ],
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(24),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                                child: Container(),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(0, Icons.home_outlined, Icons.home, theme, isDark),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(1, Icons.account_circle_outlined, Icons.account_circle, theme, isDark),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(2, Icons.upload_outlined, Icons.upload, theme, isDark),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(3, Icons.history_outlined, Icons.history, theme, isDark),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(4, Icons.schedule_outlined, Icons.schedule, theme, isDark, customSize: 20),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildNavItem(5, Icons.star_outline, Icons.star, theme, isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -3639,6 +3852,8 @@ class _MainScreenState extends State<MainScreen> {
   
   Widget _buildDefaultProfileImage(ThemeData theme) {
     return Container(
+      width: 24,
+      height: 24,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -3648,11 +3863,12 @@ class _MainScreenState extends State<MainScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
+        shape: BoxShape.circle,
       ),
       child: Icon(
         Icons.person,
         color: Colors.white,
-        size: 24,
+        size: 16,
       ),
     );
   }

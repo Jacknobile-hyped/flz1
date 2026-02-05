@@ -16,10 +16,13 @@ class SocialAccountsPage extends StatefulWidget {
 }
 
 class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBindingObserver, RouteAware {
+  // Altezza riservata per la top bar flottante (ridotta per eliminare lo spazio extra)
+  static const double _headerReservedSpace = 80.0;
   int _connectedAccountsCount = 0;
   bool _isLoading = true;
   // Flag per evitare carichi ripetuti
   bool _dataLoaded = false;
+  bool _isInitialLoad = true;
   // Stato per mostrare il popup TikTok info
   bool _showTiktokInfo = false;
 
@@ -78,8 +81,8 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
   }
 
   Future<void> loadConnectedAccountsCount() async {
-    // Don't show loading indicator if we're just refreshing
-    if (!_isLoading) {
+    // Mostra il loading indicator solo al primo caricamento
+    if (_isInitialLoad && !_isLoading) {
       setState(() {
         _isLoading = true;
       });
@@ -206,6 +209,7 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
           _connectedAccountsCount = totalCount;
           _isLoading = false;
           _dataLoaded = true;
+          _isInitialLoad = false;
         });
       }
     } catch (e) {
@@ -214,6 +218,7 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
         setState(() {
           _isLoading = false;
           _dataLoaded = true;
+          _isInitialLoad = false;
         });
       }
     }
@@ -326,213 +331,218 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
         backgroundColor: theme.brightness == Brightness.dark 
             ? Color(0xFF121212) 
             : Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 80, 16, 84), // Aggiunto padding superiore per la top bar e ~1cm di padding inferiore
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Introduction section - updated with glass opaque effect and gradient
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  // Ombre per effetto sospeso
-                  boxShadow: [
-                    BoxShadow(
-                      color: isDark 
-                          ? Colors.black.withOpacity(0.4)
-                          : Colors.black.withOpacity(0.15),
-                      blurRadius: isDark ? 25 : 20,
-                      spreadRadius: isDark ? 1 : 0,
-                      offset: const Offset(0, 10),
-                    ),
-                    BoxShadow(
-                      color: isDark 
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.white.withOpacity(0.6),
-                      blurRadius: 2,
-                      spreadRadius: -2,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                  // Gradiente lineare a 135 gradi
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF667eea), // Colore iniziale: blu violaceo
-                      Color(0xFF764ba2), // Colore finale: viola
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            Icons.connect_without_contact,
-                            color: Colors.white,
-                            size: 24,
-                          ),
+        body: Stack(
+        children: [
+          Positioned.fill(
+            child: SingleChildScrollView(
+              // Riduciamo lo spazio superiore per avvicinare la card "Connect Your Platforms" alla top bar
+              padding: EdgeInsets.fromLTRB(16, _headerReservedSpace, 16, 84),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Introduction section - updated with glass opaque effect and gradient
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      // Ombre per effetto sospeso
+                      boxShadow: [
+                        BoxShadow(
+                          color: isDark 
+                              ? Colors.black.withOpacity(0.4)
+                              : Colors.black.withOpacity(0.15),
+                          blurRadius: isDark ? 25 : 20,
+                          spreadRadius: isDark ? 1 : 0,
+                          offset: const Offset(0, 10),
                         ),
-                        const SizedBox(width: 16),
+                        BoxShadow(
+                          color: isDark 
+                              ? Colors.white.withOpacity(0.1)
+                              : Colors.white.withOpacity(0.6),
+                          blurRadius: 2,
+                          spreadRadius: -2,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                      // Gradiente lineare a 135 gradi
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF667eea), // Colore iniziale: blu violaceo
+                          Color(0xFF764ba2), // Colore finale: viola
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                Icons.connect_without_contact,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Text(
+                              'Connect Your Platforms',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
                         Text(
-                          'Connect Your Platforms',
+                          'Link your social media accounts to start scheduling and managing your content across multiple platforms.',
                           style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.9),
+                            height: 1.4,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Link your social media accounts to start scheduling and managing your content across multiple platforms.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white.withOpacity(0.9),
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              // Connected accounts stat card
-              Padding(
-                padding: const EdgeInsets.only(top: 24, bottom: 20),
-                child: _buildConnectedAccountsCard(
-                  context,
-                  _isLoading ? '...' : _connectedAccountsCount.toString(),
-                ),
-              ),
-              
-              // Social accounts section - Updated header
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 20),
-                child: Center(
-                  child: ShaderMask(
-                    shaderCallback: (Rect bounds) {
-                      return LinearGradient(
-                        colors: [
-                          Color(0xFF667eea), // Colore iniziale: blu violaceo
-                          Color(0xFF764ba2), // Colore finale: viola
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                      ).createShader(bounds);
-                    },
-                    child: Text(
-                      'Available Platforms',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        fontSize: 20,
-                        letterSpacing: -0.5,
-                      ),
-                      textAlign: TextAlign.center,
+                  ),
+                  
+                  // Connected accounts stat card
+                  Padding(
+                    padding: const EdgeInsets.only(top: 24, bottom: 20),
+                    child: _buildConnectedAccountsCard(
+                      context,
+                      _isLoading ? '...' : _connectedAccountsCount.toString(),
                     ),
                   ),
-                ),
-              ),
-              // Available platforms
-              _buildSocialAccountCard(
-                context,
-                'YouTube',
-                'Connect YouTube channel',
-                'assets/loghi/logo_yt.png',
-                const Color(0xFFFF0000),
-                () => Navigator.pushNamed(context, '/youtube'),
-              ),
-              _buildSocialAccountCard(
-                context,
-                'Instagram',
-                'Connect Instagram account',
-                'assets/loghi/logo_insta.png',
-                const Color(0xFFE1306C),
-                () => Navigator.pushNamed(context, '/instagram'),
-              ),
-              _buildSocialAccountCard(
-                context,
-                'Facebook',
-                'Connect Facebook page',
-                'assets/loghi/logo_facebook.png',
-                const Color(0xFF1877F2),
-                () => Navigator.pushNamed(context, '/facebook'),
-              ),
-              _buildSocialAccountCard(
-                context,
-                'Threads',
-                'Connect Threads account',
-                'assets/loghi/threads_logo.png',
-                const Color(0xFF000000),
-                () => Navigator.pushNamed(context, '/threads'),
-              ),
-              // Sezione Coming Soon
-              const SizedBox(height: 32),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-                child: Center(
-                  child: ShaderMask(
-                    shaderCallback: (Rect bounds) {
-                      return LinearGradient(
-                        colors: [
-                          Color(0xFF667eea), // Colore iniziale: blu violaceo
-                          Color(0xFF764ba2), // Colore finale: viola
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                      ).createShader(bounds);
-                    },
-                    child: Text(
-                      'Coming Soon',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        fontSize: 20,
-                        letterSpacing: -0.5,
+                  
+                  // Social accounts section - Updated header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 20),
+                    child: Center(
+                      child: ShaderMask(
+                        shaderCallback: (Rect bounds) {
+                          return LinearGradient(
+                            colors: [
+                              Color(0xFF667eea), // Colore iniziale: blu violaceo
+                              Color(0xFF764ba2), // Colore finale: viola
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                          ).createShader(bounds);
+                        },
+                        child: Text(
+                          'Available Platforms',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 20,
+                            letterSpacing: -0.5,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ),
-                ),
+                  // Available platforms
+                  _buildSocialAccountCard(
+                    context,
+                    'YouTube',
+                    'Connect YouTube channel',
+                    'assets/loghi/logo_yt.png',
+                    const Color(0xFFFF0000),
+                    () => Navigator.pushNamed(context, '/youtube'),
+                  ),
+                  _buildSocialAccountCard(
+                    context,
+                    'Instagram',
+                    'Connect Instagram account',
+                    'assets/loghi/logo_insta.png',
+                    const Color(0xFFE1306C),
+                    () => Navigator.pushNamed(context, '/instagram'),
+                  ),
+                  _buildSocialAccountCard(
+                    context,
+                    'Facebook',
+                    'Connect Facebook page',
+                    'assets/loghi/logo_facebook.png',
+                    const Color(0xFF1877F2),
+                    () => Navigator.pushNamed(context, '/facebook'),
+                  ),
+                  _buildSocialAccountCard(
+                    context,
+                    'Threads',
+                    'Connect Threads account',
+                    'assets/loghi/threads_logo.png',
+                    const Color(0xFF000000),
+                    () => Navigator.pushNamed(context, '/threads'),
+                  ),
+                  // Sezione Coming Soon
+                  const SizedBox(height: 32),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+                    child: Center(
+                      child: ShaderMask(
+                        shaderCallback: (Rect bounds) {
+                          return LinearGradient(
+                            colors: [
+                              Color(0xFF667eea), // Colore iniziale: blu violaceo
+                              Color(0xFF764ba2), // Colore finale: viola
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                          ).createShader(bounds);
+                        },
+                        child: Text(
+                          'Coming Soon',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 20,
+                            letterSpacing: -0.5,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+                  _buildSocialAccountCard(
+                    context,
+                    'TikTok',
+                    'Integration coming soon',
+                    'assets/loghi/logo_tiktok.png',
+                    const Color(0xFF000000),
+                    () => Navigator.pushNamed(context, '/tiktok'),
+                  ),
+                  _buildSocialAccountCard(
+                    context,
+                    'Twitter',
+                    'Integration coming soon',
+                    'assets/loghi/logo_twitter.png',
+                    const Color(0xFF1DA1F2),
+                    () => Navigator.pushNamed(context, '/twitter'),
+                  ),
+                  const SizedBox(height: 20), // Reduced space at bottom
+                ],
               ),
-              _buildSocialAccountCard(
-                context,
-                'TikTok',
-                'Integration coming soon',
-                'assets/loghi/logo_tiktok.png',
-                const Color(0xFF000000),
-                () => Navigator.pushNamed(context, '/tiktok'),
-              ),
-              _buildSocialAccountCard(
-                context,
-                'Twitter',
-                'Integration coming soon',
-                'assets/loghi/logo_twitter.png',
-                const Color(0xFF1DA1F2),
-                () => Navigator.pushNamed(context, '/twitter'),
-              ),
-              const SizedBox(height: 20), // Reduced space at bottom
-            ],
             ),
           ),
-        ),
+        ],
       ),
-    );
+    ),
+  );
   }
 
   // Enhanced connected accounts card with glass effect matching AI Powered card
@@ -540,6 +550,7 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
     BuildContext context,
     String count,
   ) {
+    final bool isShowingInitialLoading = _isInitialLoad && _isLoading;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
@@ -632,7 +643,7 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
                     Padding(
                       padding: const EdgeInsets.only(left: 4),
                       child: Text(
-                        _isLoading 
+                        isShowingInitialLoading 
                           ? 'Loading your accounts...'
                           : _connectedAccountsCount > 0 
                             ? 'Your accounts are linked to Fluzar'
@@ -661,7 +672,7 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
-                  count,
+                  isShowingInitialLoading ? '...' : count,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -833,5 +844,78 @@ class SocialAccountsPageState extends State<SocialAccountsPage> with WidgetsBind
   // Public method for external access to refresh accounts count
   void refreshAccountsCount() {
     loadConnectedAccountsCount();
+  }
+
+  Widget _buildFloatingHeader(ThemeData theme) {
+    return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      // Nessuna decorazione: niente bordo arrotondato, niente ombra, niente sfondo "card"
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.arrow_back,
+                  color: theme.brightness == Brightness.dark
+                      ? Colors.white
+                      : Colors.black87,
+                      size: 22,
+                    ),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  ShaderMask(
+                    shaderCallback: (Rect bounds) {
+                      return LinearGradient(
+                        colors: const [
+                          Color(0xFF667eea),
+                          Color(0xFF764ba2),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        transform: GradientRotation(135 * 3.14159 / 180),
+                      ).createShader(bounds);
+                    },
+                child: const Text(
+                      'Social Accounts',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                Icon(
+                  Icons.layers_outlined,
+                  size: 16,
+                  color: theme.colorScheme.primary,
+                ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_connectedAccountsCount.clamp(0, 999)} linked',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+      ),
+    );
   }
 } 

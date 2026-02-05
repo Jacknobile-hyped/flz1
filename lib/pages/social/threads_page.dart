@@ -926,16 +926,42 @@ class _ThreadsPageState extends State<ThreadsPage> with TickerProviderStateMixin
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: theme.brightness == Brightness.dark
+                      ? [
+                          Colors.white.withOpacity(0.15),
+                          Colors.white.withOpacity(0.05),
+                        ]
+                      : [
+                          Colors.white.withOpacity(0.25),
+                          Colors.white.withOpacity(0.15),
+                        ],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: theme.brightness == Brightness.dark 
-                        ? Colors.black.withOpacity(0.3)
-                        : Colors.black.withOpacity(0.05),
+                    color: theme.brightness == Brightness.dark
+                        ? Colors.black.withOpacity(0.4)
+                        : Colors.black.withOpacity(0.15),
+                    blurRadius: 25,
                     spreadRadius: 1,
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
+                    color: theme.brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.1)
+                        : Colors.white.withOpacity(0.6),
+                    blurRadius: 2,
+                    spreadRadius: -2,
+                    offset: const Offset(0, -2),
                   ),
                 ],
               ),
@@ -1027,15 +1053,42 @@ class _ThreadsPageState extends State<ThreadsPage> with TickerProviderStateMixin
               child: Container(
                 height: 36, // Reduced height
                 decoration: BoxDecoration(
-                  color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: theme.brightness == Brightness.dark
+                        ? [
+                            Colors.white.withOpacity(0.15),
+                            Colors.white.withOpacity(0.05),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.25),
+                            Colors.white.withOpacity(0.15),
+                          ],
+                  ),
                   borderRadius: BorderRadius.circular(30),
+                  border: Border.all(
+                    color: theme.brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: theme.brightness == Brightness.dark 
-                          ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: 25,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 10),
+                    ),
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
+                      offset: const Offset(0, -2),
                     ),
                   ],
                 ),
@@ -1238,21 +1291,47 @@ class _ThreadsPageState extends State<ThreadsPage> with TickerProviderStateMixin
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
       ),
-      color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+      color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark
+                ? [
+                    Colors.white.withOpacity(0.15),
+                    Colors.white.withOpacity(0.05),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.25),
+                    Colors.white.withOpacity(0.15),
+                  ],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: theme.brightness == Brightness.dark
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: theme.brightness == Brightness.dark 
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
+              color: theme.brightness == Brightness.dark
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: 25,
               spreadRadius: 1,
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              offset: const Offset(0, 10),
+            ),
+            BoxShadow(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.white.withOpacity(0.6),
+              blurRadius: 2,
+              spreadRadius: -2,
+              offset: const Offset(0, -2),
             ),
           ],
         ),
@@ -1275,7 +1354,7 @@ class _ThreadsPageState extends State<ThreadsPage> with TickerProviderStateMixin
               ),
             );
           },
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1529,19 +1608,45 @@ class _ThreadsPageState extends State<ThreadsPage> with TickerProviderStateMixin
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // era 12, ora 8
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.brightness == Brightness.dark
+              ? [
+                  Colors.white.withOpacity(0.15),
+                  Colors.white.withOpacity(0.05),
+                ]
+              : [
+                  Colors.white.withOpacity(0.25),
+                  Colors.white.withOpacity(0.15),
+                ],
+        ),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(25),
           bottomRight: Radius.circular(25),
         ),
+        border: Border.all(
+          color: theme.brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: theme.brightness == Brightness.dark 
-                ? Colors.black.withOpacity(0.3)
-                : Colors.black.withOpacity(0.05),
+            color: theme.brightness == Brightness.dark
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: 25,
             spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: theme.brightness == Brightness.dark
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, -2),
           ),
         ],
       ),

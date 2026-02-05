@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'scheduled_post_details_page.dart';
 import './upload_video_page.dart'; // Add import for the upload page
 import 'dart:io';
+import 'dart:ui';
 
 class MonthlyDetailPage extends StatefulWidget {
   final DateTime focusedMonth;
@@ -702,29 +703,67 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
     
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Card(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        elevation: 2,
-        color: isDark ? Color(0xFF1E1E1E) : Colors.white,
-      child: InkWell(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ScheduledPostDetailsPage(
-                post: event,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            decoration: BoxDecoration(
+              // Effetto vetro semi-trasparente opaco
+              color: isDark ? Colors.white.withOpacity(0.12) : Colors.white.withOpacity(0.28),
+              borderRadius: BorderRadius.circular(12),
+              // Bordo con effetto vetro
+              border: Border.all(
+                color: isDark ? Colors.white.withOpacity(0.18) : Colors.white.withOpacity(0.4),
+                width: 1,
+              ),
+              // Ombre per effetto sospeso
+              boxShadow: [
+                BoxShadow(
+                  color: isDark ? Colors.black.withOpacity(0.35) : Colors.black.withOpacity(0.12),
+                  blurRadius: isDark ? 22 : 18,
+                  spreadRadius: isDark ? 0.5 : 0,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.white.withOpacity(0.55),
+                  blurRadius: 2,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+              // Gradiente sottile per effetto vetro
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [
+                        Colors.white.withOpacity(0.16),
+                        Colors.white.withOpacity(0.08),
+                      ]
+                    : [
+                        Colors.white.withOpacity(0.34),
+                        Colors.white.withOpacity(0.24),
+                      ],
               ),
             ),
-          );
-        },
-        borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ScheduledPostDetailsPage(
+                      post: event,
+                    ),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 // Thumbnail with improved styling
                 Container(
           decoration: BoxDecoration(
@@ -806,7 +845,7 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
                           child: Container(
                             padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: isDark ? Colors.transparent : Colors.white,
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
@@ -903,7 +942,7 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
                             child: Container(
                               padding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                             decoration: BoxDecoration(
-                                color: Colors.grey[100],
+                                color: isDark ? Colors.transparent : Colors.grey[100],
                                 borderRadius: BorderRadius.circular(6),
                                 boxShadow: [
                                   BoxShadow(
@@ -947,6 +986,8 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
                 ),
               ),
             ],
+            ),
+              ),
             ),
           ),
         ),
@@ -1004,11 +1045,11 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFF34C759),
+        color: const Color(0xFFFF9500), // Arancione per scheduled
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF34C759).withOpacity(0.3),
+            color: const Color(0xFFFF9500).withOpacity(0.3),
             blurRadius: 3,
             offset: const Offset(0, 1),
           ),
@@ -1039,6 +1080,49 @@ class _MonthlyDetailPageState extends State<MonthlyDetailPage> {
   
   // Nuovo metodo per mostrare la durata in modo statico
   Widget _buildStaticDurationBadge(Map<String, dynamic> event) {
+    // Controlla se è un carosello (ha cloudflare_urls o media_urls con più di una voce)
+    final cloudflareUrls = event['cloudflare_urls'];
+    final mediaUrls = event['media_urls'];
+    
+    // Helper per verificare se una struttura contiene più elementi
+    bool _hasMultipleItems(dynamic data) {
+      if (data == null) return false;
+      if (data is List && data.length > 1) return true;
+      if (data is Map) {
+        // Conta solo le chiavi che sono numeriche o stringhe numeriche (indici)
+        int count = 0;
+        for (var key in data.keys) {
+          // Accetta chiavi numeriche (int) o stringhe numeriche ("0", "1", "2", ecc.)
+          if (key is int || (key is String && int.tryParse(key) != null)) {
+            count++;
+          }
+        }
+        return count > 1;
+      }
+      return false;
+    }
+    
+    // Verifica se è un carosello controllando entrambi i campi
+    bool isCarousel = _hasMultipleItems(cloudflareUrls) || _hasMultipleItems(mediaUrls);
+    
+    // Se è un carosello, mostra "CAROUSEL" (ha priorità su tutto)
+    if (isCarousel) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'CAROUSEL',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
     // Se è un'immagine, mostra "IMG"
     if (event['media_type'] == 'image') {
       return Container(

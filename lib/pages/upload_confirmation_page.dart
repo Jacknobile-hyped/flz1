@@ -44,14 +44,16 @@ class AccountPanel {
 }
 
 class UploadConfirmationPage extends StatefulWidget {
-  final File videoFile;
+  final File? videoFile; // Mantenuto per retrocompatibilità, ma deprecato
+  final List<File>? videoFiles; // Nuova lista di file
+  final List<bool>? isImageFiles; // Nuova lista di flag per immagini
   final String title;
   final String description;
   final Map<String, List<String>> selectedAccounts;
   final Map<String, List<Map<String, dynamic>>> socialAccounts;
   final VoidCallback onConfirm;
   final bool isDraft;
-  final bool isImageFile;
+  final bool isImageFile; // Mantenuto per retrocompatibilità
   final Map<String, String> instagramContentType;
   final String? cloudflareUrl; // Aggiungo l'URL di Cloudflare R2
   // Add map for platform-specific descriptions
@@ -63,10 +65,13 @@ class UploadConfirmationPage extends StatefulWidget {
   final String? draftId; // Add draft ID parameter
   final File? youtubeThumbnailFile; // Per la miniatura personalizzata di YouTube
   final Map<String, Map<String, dynamic>>? tiktokOptions; // Opzioni TikTok per ogni account
+  final Map<String, Map<String, dynamic>>? youtubeOptions; // Opzioni YouTube per ogni account
 
   const UploadConfirmationPage({
     super.key,
-    required this.videoFile,
+    this.videoFile, // Opzionale per retrocompatibilità
+    this.videoFiles, // Nuova lista di file
+    this.isImageFiles, // Nuova lista di flag
     required this.title,
     required this.description,
     required this.selectedAccounts,
@@ -83,6 +88,7 @@ class UploadConfirmationPage extends StatefulWidget {
     this.draftId, // Add draft ID parameter
     this.youtubeThumbnailFile, // Per la miniatura personalizzata di YouTube
     this.tiktokOptions, // Opzioni TikTok per ogni account
+    this.youtubeOptions, // Opzioni YouTube per ogni account
   });
 
   @override
@@ -108,6 +114,14 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   bool _isVideoInitialized = false;
   bool _isVideoPlaying = false;
   bool _isDisposed = false; // Track widget disposal
+  
+  // Variabili per gestire più media
+  List<File> _mediaFiles = [];
+  List<bool> _isImageFiles = [];
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0;
+  File? _currentMediaFile;
+  bool _currentIsImage = false;
   
   // Aggiungi variabili per la gestione a tutto schermo
   bool _isFullScreen = false;
@@ -138,6 +152,10 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   bool _isLoadingCredits = true;
   bool _showCreditsWarning = false;
   
+  // Variabili per gestione disclaimer (mostrato solo al primo video)
+  bool _showDisclaimer = false;
+  bool _isCheckingVideos = true;
+  
   // Platform logos for UI display
   final Map<String, String> _platformLogos = {
     'TikTok': 'assets/loghi/logo_tiktok.png',
@@ -152,13 +170,35 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   void initState() {
     super.initState();
     
+    // Inizializza le liste di media
+    if (widget.videoFiles != null && widget.videoFiles!.isNotEmpty) {
+      _mediaFiles = widget.videoFiles!;
+      _isImageFiles = widget.isImageFiles ?? List.generate(_mediaFiles.length, (index) => false);
+      
+      // Inizializza il carosello se ci sono più file
+      if (_mediaFiles.length > 1) {
+        _carouselController = PageController(initialPage: 0);
+      }
+      
+      // Imposta il media corrente
+      _currentCarouselIndex = 0;
+      _currentMediaFile = _mediaFiles[0];
+      _currentIsImage = _isImageFiles[0];
+    } else if (widget.videoFile != null) {
+      // Retrocompatibilità: usa il singolo file
+      _mediaFiles = [widget.videoFile!];
+      _isImageFiles = [widget.isImageFile];
+      _currentMediaFile = widget.videoFile!;
+      _currentIsImage = widget.isImageFile;
+    }
+    
     // Initialize video player if not an image but with a delay
-    if (!widget.isImageFile) {
+    if (_currentMediaFile != null && !_currentIsImage) {
       // Delay initialization to ensure widget is fully built
       Future.delayed(const Duration(milliseconds: 700), () { // Increased delay
         if (!_isDisposed) {
           // First check if the file is too large before trying anything
-          widget.videoFile.length().then((fileSize) {
+          _currentMediaFile!.length().then((fileSize) {
             final fileSizeMB = fileSize / (1024 * 1024);
             
             if (fileSizeMB > 200) {
@@ -188,6 +228,9 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     
     // Carica i crediti dell'utente
     _loadUserCredits();
+    
+    // Controlla se è il primo video per mostrare il disclaimer
+    _checkIfFirstVideo();
   }
   
   void _startPositionUpdateTimer() {
@@ -237,13 +280,66 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     }
   }
   
+  // Metodo per controllare se è il primo video (mostra disclaimer solo se la cartella videos non esiste o è vuota)
+  Future<void> _checkIfFirstVideo() async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        setState(() {
+          _isCheckingVideos = false;
+          _showDisclaimer = false;
+        });
+        return;
+      }
+      
+      final videosSnapshot = await _database
+          .child('users')
+          .child('users')
+          .child(currentUser.uid)
+          .child('videos')
+          .get();
+      
+      if (!mounted) return;
+      
+      // Mostra il disclaimer solo se la cartella videos non esiste o è vuota
+      bool shouldShowDisclaimer = false;
+      if (!videosSnapshot.exists) {
+        // La cartella non esiste
+        shouldShowDisclaimer = true;
+      } else {
+        // La cartella esiste, controlla se è vuota
+        final videos = videosSnapshot.value;
+        if (videos == null || (videos is Map && videos.isEmpty)) {
+          shouldShowDisclaimer = true;
+        }
+      }
+      
+      setState(() {
+        _showDisclaimer = shouldShowDisclaimer;
+        _isCheckingVideos = false;
+      });
+    } catch (e) {
+      print('Error checking if first video: $e');
+      // In caso di errore, non mostrare il disclaimer per sicurezza
+      if (mounted) {
+        setState(() {
+          _showDisclaimer = false;
+          _isCheckingVideos = false;
+        });
+      }
+    }
+  }
+  
   // Metodo per calcolare i crediti necessari per il video
   int _calculateRequiredCredits() {
     try {
-      final fileSize = widget.videoFile.lengthSync();
-      final fileSizeMB = fileSize / (1024 * 1024);
-      final requiredCredits = (fileSizeMB * 0.4).ceil();
-      return requiredCredits;
+      int totalCredits = 0;
+      for (var file in _mediaFiles) {
+        final fileSize = file.lengthSync();
+        final fileSizeMB = fileSize / (1024 * 1024);
+        totalCredits += (fileSizeMB * 0.4).ceil();
+      }
+      return totalCredits > 0 ? totalCredits : 1;
     } catch (e) {
       print('Error calculating required credits: $e');
       return 1; // Default a 1 credito in caso di errore
@@ -451,9 +547,11 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     // Dispose any existing controller first
     _disposeVideoController();
     
+    if (_currentMediaFile == null || _currentIsImage) return;
+    
     try {
       // Check file size before processing to avoid memory issues
-      final fileSize = await widget.videoFile.length();
+      final fileSize = await _currentMediaFile!.length();
       final fileSizeMB = fileSize / (1024 * 1024);
       print('Video file size: ${fileSizeMB.toStringAsFixed(2)} MB');
       
@@ -467,7 +565,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       // Force a small delay before creating controller to allow memory cleanup
       await Future.delayed(const Duration(milliseconds: 100));
       
-    _videoPlayerController = VideoPlayerController.file(widget.videoFile);
+    _videoPlayerController = VideoPlayerController.file(_currentMediaFile!);
       _videoPlayerController!.setVolume(0.0); // Mute video to save resources
       _videoPlayerController!.setLooping(false); // Don't loop to save memory
       
@@ -535,7 +633,8 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
         !_isDisposed) {
       try {
         // If the video is too large, avoid playing it
-        widget.videoFile.length().then((fileSize) {
+        if (_currentMediaFile == null) return;
+        _currentMediaFile!.length().then((fileSize) {
           final fileSizeMB = fileSize / (1024 * 1024);
           if (fileSizeMB > 120) { // Aumentato a 120MB per consentire più video
             // Just show a toast/snackbar instead of playing
@@ -639,6 +738,8 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   void dispose() {
     _isDisposed = true;
     _positionUpdateTimer?.cancel();
+    _controlsHideTimer?.cancel();
+    _carouselController?.dispose();
     if (_videoPlayerController != null) {
       _videoPlayerController!.pause();
       _videoPlayerController!.dispose();
@@ -687,18 +788,22 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   }
 
   Future<void> _uploadToPlatforms() async {
+    // Usa sempre il media corrente (o il primo) come file principale
+    final File primaryFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+    final bool primaryIsImage = _currentIsImage;
+
     // Navigate to the upload status page
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => UploadStatusPage(
-          videoFile: widget.videoFile,
+          videoFile: primaryFile,
           title: widget.title,
           description: widget.description,
           selectedAccounts: widget.selectedAccounts,
           socialAccounts: widget.socialAccounts,
           onComplete: widget.onConfirm,
-          isImageFile: widget.isImageFile,
+          isImageFile: primaryIsImage,
           instagramContentType: widget.instagramContentType,
           cloudflareUrl: widget.cloudflareUrl,
           platformDescriptions: widget.platformDescriptions,
@@ -716,6 +821,9 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     try {
       // First, upload the file to Cloudflare R2 storage
       String? cloudflareUrl = widget.cloudflareUrl;
+      // Usa il media principale come file da caricare
+      final File primaryFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+      final bool primaryIsImage = _currentIsImage;
       
       // If we didn't receive a cloudflareUrl from the parent, upload it now
       if (cloudflareUrl == null) {
@@ -723,7 +831,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
         
         try {
           // Upload the file to Cloudflare just once, and store the URL
-          cloudflareUrl = await _uploadToCloudflare(widget.videoFile, isImage: widget.isImageFile);
+          cloudflareUrl = await _uploadToCloudflare(primaryFile, isImage: primaryIsImage);
           
           // Store the URL in the class variable to be used by all platforms
           _cloudflareUrl = cloudflareUrl ?? '';
@@ -737,7 +845,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
           if (!isUploaded) {
             print('Il file sembra non essere stato caricato correttamente, riprovo...');
             updateProgress('cloudflare', 'storage', 'Retrying upload...', 0.5);
-            cloudflareUrl = await _retryCloudflareUpload(widget.videoFile, isImage: widget.isImageFile);
+            cloudflareUrl = await _retryCloudflareUpload(primaryFile, isImage: primaryIsImage);
             // Update the stored URL with the retry result
             _cloudflareUrl = cloudflareUrl ?? '';
           }
@@ -771,7 +879,14 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
           if (!isThumbnailUploaded) {
             print('La thumbnail sembra non essere stata caricata correttamente, riprovo...');
             updateProgress('thumbnail', 'thumb', 'Retrying thumbnail upload...', 0.5);
-            thumbnailUrl = await _retryCloudflareUpload(File(_thumbnailPath!), isImage: true, customPath: 'videos/thumbnails/${widget.videoFile.path.split('/').last.split('.').first}_thumbnail.jpg');
+            final String videoFileName = (_currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!)))
+                .path
+                .split('/')
+                .last
+                .split('.')
+                .first;
+            final String retryThumbPath = 'videos/thumbnails/${videoFileName}_thumbnail.jpg';
+            thumbnailUrl = await _retryCloudflareUpload(File(_thumbnailPath!), isImage: true, customPath: retryThumbPath);
             _thumbnailCloudflareUrl = thumbnailUrl;
           }
         }
@@ -940,8 +1055,11 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
 
       updateProgress('Twitter', accountId, 'Uploading media to Twitter...', 0.4);
       
+      // Usa il media corrente (video) per l'upload
+      final File mediaFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+      
       final uploadResponse = await twitter.media.uploadMedia(
-        file: widget.videoFile,
+        file: mediaFile,
       );
       
       if (uploadResponse.data == null) {
@@ -1099,24 +1217,46 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       
       // Get platform-specific description and title if available
       String videoDescription = widget.description;
-      String videoTitle = widget.title.isNotEmpty ? widget.title : widget.videoFile.path.split('/').last;
+      final File titleFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+      String videoTitle = widget.title.isNotEmpty ? widget.title : titleFile.path.split('/').last;
       
       if (widget.platformDescriptions.containsKey('YouTube') && 
           widget.platformDescriptions['YouTube']!.containsKey(accountId)) {
         videoDescription = widget.platformDescriptions['YouTube']![accountId]!;
       }
       
+      // Get account-specific title if available
+      if (widget.platformDescriptions.containsKey('YouTube') &&
+          widget.platformDescriptions['YouTube']!.containsKey('${accountId}_title')) {
+        videoTitle = widget.platformDescriptions['YouTube']!['${accountId}_title']!;
+      }
+      
+      // Get YouTube options for this account, with defaults
+      final youtubeOptions = widget.youtubeOptions?[accountId] ?? {
+        'categoryId': '22',
+        'privacyStatus': 'public',
+        'license': 'youtube',
+        'notifySubscribers': true,
+        'embeddable': true,
+        'madeForKids': false,
+      };
+      
       final videoMetadata = {
         'snippet': {
           'title': videoTitle,
           'description': videoDescription,
-          'categoryId': '22',
+          'categoryId': youtubeOptions['categoryId'] ?? '22',
         },
         'status': {
-          'privacyStatus': 'public',
-          'madeForKids': false,
+          'privacyStatus': youtubeOptions['privacyStatus'] ?? 'public',
+          'license': youtubeOptions['license'] ?? 'youtube',
+          'embeddable': youtubeOptions['embeddable'] ?? true,
+          'madeForKids': youtubeOptions['madeForKids'] ?? false,
         }
       };
+      
+      // Get notifySubscribers parameter
+      final notifySubscribers = youtubeOptions['notifySubscribers'] ?? true;
       
       // First, upload the video
       updateProgress('YouTube', accountId, 'Uploading video content...', 0.4);
@@ -1126,6 +1266,9 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       const maxUploadRetries = 3;
       http.Response? uploadResponse;
       
+      // Usa il media principale per l'upload
+      final File uploadFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+
       while (uploadRetries < maxUploadRetries && (uploadResponse == null || uploadResponse.statusCode != 200)) {
         try {
           uploadResponse = await http.post(
@@ -1134,9 +1277,9 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
               'Authorization': 'Bearer ${googleAuth.accessToken}',
               'Content-Type': 'application/octet-stream',
               'X-Upload-Content-Type': 'video/*',
-              'X-Upload-Content-Length': widget.videoFile.lengthSync().toString(),
+              'X-Upload-Content-Length': uploadFile.lengthSync().toString(),
             },
-            body: await widget.videoFile.readAsBytes(),
+            body: await uploadFile.readAsBytes(),
           ).timeout(
             const Duration(minutes: 5),
             onTimeout: () => throw TimeoutException('Upload request timed out. Check your internet connection.'),
@@ -1176,8 +1319,10 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       
       while (metadataRetries < maxMetadataRetries && (metadataResponse == null || metadataResponse.statusCode != 200)) {
         try {
+          // Build metadata URI with notifySubscribers parameter
+          final metadataUri = Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status${notifySubscribers ? '&notifySubscribers=true' : ''}');
           metadataResponse = await http.put(
-            Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status'),
+            metadataUri,
             headers: {
               'Authorization': 'Bearer ${googleAuth.accessToken}',
               'Content-Type': 'application/json',
@@ -1186,7 +1331,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
               'id': videoId,
               ...videoMetadata,
             }),
-          ).timeout(
+            ).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw TimeoutException('Metadata update request timed out. Check your internet connection.'),
           );
@@ -1340,8 +1485,8 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       }
 
       // Determine if we're uploading a video or an image
-      final File mediaFile = widget.videoFile;
-      final bool isImage = widget.isImageFile;
+      final File mediaFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+      final bool isImage = _currentIsImage;
       
       // Upload the media to Cloudflare R2 if not already uploaded
       String? mediaCloudflareUrl;
@@ -1554,12 +1699,14 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       }
 
       // Prepare video data
+      final File storedFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+
       final videoData = {
         'title': widget.title,
         'platforms': widget.selectedAccounts.keys.toList(),
         'status': 'published',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'video_path': widget.videoFile.path,
+        'video_path': storedFile.path,
         'thumbnail_path': _thumbnailPath ?? '',
         'accounts': accountsData,
         'user_id': currentUser.uid,
@@ -1635,11 +1782,13 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
           }
         }
 
+        final File storedFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+
         final videoData = {
           'platforms': widget.selectedAccounts.keys.toList(),
           'status': 'draft',
           'timestamp': DateTime.now().millisecondsSinceEpoch,
-          'video_path': widget.videoFile.path,
+          'video_path': storedFile.path,
           'thumbnail_path': _thumbnailPath ?? '',
           'title': widget.title,
           'user_id': currentUser.uid,
@@ -1708,7 +1857,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     // Check if we should use a simpler layout for large files
     bool useSimpleLayout = false;
     try {
-      if (!widget.isImageFile && _thumbnailPath == null && !_isVideoInitialized) {
+      if (!_currentIsImage && _thumbnailPath == null && !_isVideoInitialized) {
         useSimpleLayout = true;
       }
     } catch (e) {
@@ -1758,7 +1907,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                   child: Stack(
                     children: [
                       // Se è un'immagine, mostrala a tutto schermo con bordi neri
-                      if (widget.isImageFile)
+                      if (_currentIsImage)
                         Center(
                           child: Container(
                             width: mediaWidth,
@@ -1805,7 +1954,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                             
                             // Pulsante per uscire dalla modalità fullscreen
                             Positioned(
-                              top: 20,
+                              top: 70,
                               left: 20,
                               child: Container(
                                 decoration: BoxDecoration(
@@ -1814,13 +1963,16 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                                 ),
                                 child: IconButton(
                                   icon: Icon(Icons.fullscreen_exit, color: Colors.white),
-                                  onPressed: _toggleFullScreen,
+                                  onPressed: () {
+                                    _pauseVideo();
+                                    _toggleFullScreen();
+                                  },
                                 ),
                               ),
                             ),
                             
                             // Pulsante Play/Pause al centro solo per i video
-                            if (!widget.isImageFile && _isVideoInitialized && _videoPlayerController != null)
+                            if (!_currentIsImage && _isVideoInitialized && _videoPlayerController != null)
                               Center(
                                 child: Container(
                                   decoration: BoxDecoration(
@@ -1840,7 +1992,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                               ),
                             
                             // Progress bar solo per i video
-                            if (!widget.isImageFile && _isVideoInitialized && _videoPlayerController != null)
+                            if (!_currentIsImage && _isVideoInitialized && _videoPlayerController != null)
                               Positioned(
                                 left: 0,
                                 right: 0,
@@ -1949,63 +2101,67 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                                 ],
                               ),
                               clipBehavior: Clip.antiAlias,
-                              child: Stack(
-                                children: [
-                                  // Contenuto principale (video o immagine)
-                                  if (widget.isImageFile)
-                                    Stack(
+                              child: _mediaFiles.length > 1
+                                  ? _buildCarouselMediaPreview(theme, videoContainerHeight, useSimpleLayout)
+                                  : Stack(
                                       children: [
-                                        Container(
-                                          width: double.infinity,
-                                          height: videoContainerHeight,
-                                          color: Colors.black,
-                                          child: Center(
-                                            child: Image.file(
-                                              widget.videoFile,
-                                              fit: BoxFit.contain,
-                                              errorBuilder: (context, error, stackTrace) {
-                                                return Center(
-                                                  child: Icon(
-                                                    Icons.image_not_supported,
-                                                    color: Colors.grey[400],
-                                                    size: 48,
+                                        // Contenuto principale (video o immagine)
+                                        if (_currentIsImage)
+                                          Stack(
+                                            children: [
+                                              Container(
+                                                width: double.infinity,
+                                                height: videoContainerHeight,
+                                                color: Colors.black,
+                                                child: Center(
+                                                  child: _currentMediaFile != null
+                                                      ? Image.file(
+                                                          _currentMediaFile!,
+                                                          fit: BoxFit.contain,
+                                                          errorBuilder: (context, error, stackTrace) {
+                                                            return Center(
+                                                              child: Icon(
+                                                                Icons.image_not_supported,
+                                                                color: Colors.grey[400],
+                                                                size: 48,
+                                                              ),
+                                                            );
+                                                          },
+                                                        )
+                                                      : SizedBox(),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                bottom: 12,
+                                                right: 12,
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.black.withOpacity(0.6),
+                                                    borderRadius: BorderRadius.circular(25),
                                                   ),
-                                                );
-                                              },
-                                            ),
-                                          ),
-                                        ),
-                                        Positioned(
-                                          bottom: 12,
-                                          right: 12,
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: Colors.black.withOpacity(0.6),
-                                              borderRadius: BorderRadius.circular(25),
-                                            ),
-                                            child: IconButton(
-                                              icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
-                                              onPressed: () {
-                                                setState(() {
-                                                  _isFullScreen = true;
-                                                });
-                                              },
-                                            ),
-                                          ),
-                                        ),
+                                                  child: IconButton(
+                                                    icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
+                                                    onPressed: () {
+                                                      setState(() {
+                                                        _isFullScreen = true;
+                                                      });
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          )
+                                        else
+                                          useSimpleLayout
+                                              ? _buildSimpleMediaPreview(theme)
+                                              : _buildRichMediaPreview(theme),
                                       ],
-                                    )
-                                  else
-                                    useSimpleLayout
-                                      ? _buildSimpleMediaPreview(theme)
-                                      : _buildRichMediaPreview(theme),
-                                ],
-                              ),
+                                    ),
                             ),
                           ),
                           
-                          // Spacing after media container
-                          SizedBox(height: 16),
+                          // Spacing after media container (ridotto per ridurre gap con account)
+                          SizedBox(height: 0),
                           
                           // Divider prima della sezione account
                           Divider(height: 1, thickness: 1, color: theme.colorScheme.surfaceVariant.withOpacity(0.5)),
@@ -2097,7 +2253,11 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                                                 platform.toUpperCase(),
                                                 style: theme.textTheme.titleMedium?.copyWith(
                                                   fontWeight: FontWeight.bold,
-                                                  color: _getPlatformColor(platform),
+                                                  color: (theme.brightness == Brightness.dark &&
+                                                          (platform.toLowerCase() == 'threads' ||
+                                                           platform.toLowerCase() == 'tiktok'))
+                                                      ? Colors.white
+                                                      : _getPlatformColor(platform),
                                                   fontSize: 14,
                                                 ),
                                               ),
@@ -2136,7 +2296,8 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
 
                           SizedBox(height: 32),
                           
-                          // Disclaimer con checkbox
+                          // Disclaimer con checkbox (mostrato solo se è il primo video)
+                          if (_showDisclaimer && !_isCheckingVideos)
                           Container(
                             margin: EdgeInsets.symmetric(horizontal: 16),
                             padding: EdgeInsets.all(20),
@@ -2255,15 +2416,16 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
               ),
           ),
           
-          // Floating header
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: _buildHeader(),
+          // Floating header - nasconde quando è in fullscreen
+          if (!_isFullScreen)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: _buildHeader(),
+              ),
             ),
-          ),
         ],
       ),
       // Avviso crediti insufficienti
@@ -2323,10 +2485,12 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => InstagramUploadPage(
-                              mediaFile: widget.videoFile,
+                              mediaFile: _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!)),
+                              mediaFiles: _mediaFiles,
+                              isImageFiles: _isImageFiles,
                               title: widget.title,
                               description: widget.description,
-                              isImageFile: widget.isImageFile,
+                              isImageFile: _currentIsImage,
                               selectedAccounts: widget.selectedAccounts,
                               socialAccounts: widget.socialAccounts,
                               instagramContentType: widget.instagramContentType,
@@ -2334,6 +2498,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                               draftId: widget.draftId, // Pass the draft ID
                               youtubeThumbnailFile: widget.youtubeThumbnailFile, // Passa la thumbnail YouTube
                               tiktokOptions: widget.tiktokOptions, // Passa le opzioni TikTok
+                              youtubeOptions: widget.youtubeOptions, // Passa le opzioni YouTube
                             ),
                           ),
                         );
@@ -2414,6 +2579,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     required String accountId,
     required bool hasCustomDescription,
   }) {
+    final isDark = theme.brightness == Brightness.dark;
     final username = account['username'] as String? ?? '';
     final displayName = account['display_name'] as String? ?? username;
     final profileImageUrl = account['profile_image_url'] as String?;
@@ -2429,6 +2595,11 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
     
     // Either custom title or custom description qualifies for showing details
     final bool hasCustomContent = hasCustomDescription || hasCustomTitle;
+    
+    // Per Threads e TikTok, usa bianco in dark mode invece di nero per l'icona
+    final iconColor = (platform.toLowerCase() == 'threads' || platform.toLowerCase() == 'tiktok') && isDark
+        ? Colors.white
+        : _getPlatformColor(platform);
     
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -2532,7 +2703,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
               : null,
             icon: Icon(Icons.info_outline, size: 20),
             style: IconButton.styleFrom(
-              foregroundColor: _getPlatformColor(platform),
+              foregroundColor: iconColor,
               backgroundColor: _getPlatformLightColor(platform),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -2588,10 +2759,15 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   // Method to show custom description dialog
   void _showCustomDescriptionDialog(BuildContext context, String platform, Map<String, dynamic> account, String description) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final username = account['username'] as String? ?? '';
     final displayName = account['display_name'] as String? ?? username;
     final profileImageUrl = account['profile_image_url'] as String?;
     final platformColor = _getPlatformColor(platform);
+    // Per Threads e TikTok, usa bianco in dark mode invece di nero
+    final displayPlatformColor = (platform.toLowerCase() == 'threads' || platform.toLowerCase() == 'tiktok') && isDark
+        ? Colors.white
+        : platformColor;
     
     // Extract accountId - since this might not be in the account map, 
     // we need to find it based on the username or other identifier
@@ -2678,7 +2854,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                     '$platform Content Details',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: platformColor,
+                      color: displayPlatformColor,
                     ),
                   ),
                   Spacer(),
@@ -2893,7 +3069,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       file = input;
     } else if (input is String && platform != null) {
       // Questa è una chiamata dalla nuova implementazione per Facebook
-      file = widget.videoFile;
+      file = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
       
       if (mounted && platform != null && accountId != null && startProgress != null && endProgress != null) {
         _updateUploadProgress(platform, accountId, 'Preparazione caricamento su cloud storage...', startProgress);
@@ -3323,7 +3499,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       
       final bytesToSave = compressedBytes ?? thumbnailBytes;
       
-      final fileName = widget.videoFile.path.split('/').last;
+      final fileName = _currentMediaFile?.path.split('/').last ?? 'video';
       final thumbnailFileName = '${fileName.split('.').first}_thumbnail.jpg';
       
       // Get the app's temporary directory
@@ -3345,14 +3521,43 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   }
 
   // New method to generate a thumbnail from the video
+  // Metodo per gestire il cambio di media nel carosello
+  void _onCarouselPageChanged(int index) {
+    if (index < 0 || index >= _mediaFiles.length) return;
+    
+    setState(() {
+      _currentCarouselIndex = index;
+      _currentMediaFile = _mediaFiles[index];
+      _currentIsImage = _isImageFiles[index];
+      
+      // Ferma e dispone il video player corrente
+      if (_videoPlayerController != null) {
+        _videoPlayerController!.pause();
+        _videoPlayerController!.dispose();
+        _videoPlayerController = null;
+        _isVideoInitialized = false;
+        _isVideoPlaying = false;
+      }
+    });
+    
+    // Inizializza il video player per il nuovo media se è un video
+    if (!_currentIsImage) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (!_isDisposed && mounted) {
+          _initializeVideoPlayer();
+        }
+      });
+    }
+  }
+  
   Future<void> _generateThumbnail() async {
-    if (widget.isImageFile || _isDisposed) return;
+    if (_currentIsImage || _isDisposed || _currentMediaFile == null) return;
     
     try {
-      print('Generating thumbnail for: ${widget.videoFile.path}');
+      print('Generating thumbnail for: ${_currentMediaFile!.path}');
       
       // Check file size before processing to avoid memory issues
-      final fileSize = await widget.videoFile.length();
+      final fileSize = await _currentMediaFile!.length();
       final fileSizeMB = fileSize / (1024 * 1024);
       print('Video file size: ${fileSizeMB.toStringAsFixed(2)} MB');
       
@@ -3379,7 +3584,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       try {
         // Use video_thumbnail package to generate thumbnail with optimized settings
       final thumbnailBytes = await VideoThumbnail.thumbnailData(
-        video: widget.videoFile.path,
+        video: _currentMediaFile!.path,
         imageFormat: ImageFormat.JPEG,
           quality: targetQuality,
           maxWidth: targetWidth, // Smaller width for thumbnails
@@ -3422,12 +3627,14 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
   
   // Fallback method for thumbnail generation with even lower memory usage
   Future<void> _generateFallbackThumbnail() async {
+    if (_currentMediaFile == null || _currentIsImage) return;
+    
     try {
       print('Attempting fallback thumbnail generation');
       
       // Use the absolute minimal settings
       final thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: widget.videoFile.path,
+        video: _currentMediaFile!.path,
         thumbnailPath: (await getTemporaryDirectory()).path,
         imageFormat: ImageFormat.JPEG,
         quality: 40,
@@ -3472,7 +3679,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
       }
       
       // Upload the thumbnail with an appropriate path in Cloudflare
-      final String videoFileName = widget.videoFile.path.split('/').last.split('.').first;
+      final String videoFileName = _currentMediaFile?.path.split('/').last.split('.').first ?? 'video';
       final String thumbnailCloudPath = 'videos/thumbnails/${videoFileName}_thumbnail.jpg';
       
       // Usa la nuova firma del metodo _uploadToCloudflare
@@ -3896,7 +4103,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              widget.isImageFile ? Icons.photo : Icons.video_library,
+              _currentIsImage ? Icons.photo : Icons.video_library,
               size: 64,
               color: Colors.white,
             ),
@@ -3908,7 +4115,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                widget.videoFile.path.split('/').last,
+                _currentMediaFile?.path.split('/').last ?? 'Unknown',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
@@ -3921,7 +4128,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              widget.isImageFile ? 'Loading image...' : 'Loading video...',
+              _currentIsImage ? 'Loading image...' : 'Loading video...',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.8),
                 fontSize: 14,
@@ -3942,13 +4149,13 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              widget.isImageFile ? Icons.photo : Icons.video_library,
+              _currentIsImage ? Icons.photo : Icons.video_library,
               size: 64,
               color: Colors.white,
             ),
             const SizedBox(height: 16),
             Text(
-              widget.isImageFile ? 'Immagine' : 'Video',
+              _currentIsImage ? 'Immagine' : 'Video',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -3973,7 +4180,7 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                widget.videoFile.path.split('/').last,
+                _currentMediaFile?.path.split('/').last ?? 'Unknown',
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.7),
                   fontSize: 12,
@@ -3991,9 +4198,13 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
 
   // Rich media preview with improved video player controls
   Widget _buildRichMediaPreview(ThemeData theme) {
-    return widget.isImageFile 
+    if (_currentMediaFile == null) {
+      return _buildPlaceholder(theme);
+    }
+    
+    return _currentIsImage 
       ? Image.file(
-          widget.videoFile,
+          _currentMediaFile!,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             print('Error loading image: $error');
@@ -4091,6 +4302,128 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
             ],
           )
         : _buildPlaceholder(theme);
+  }
+
+  // Build carousel media preview for multiple media
+  Widget _buildCarouselMediaPreview(ThemeData theme, double containerHeight, bool useSimpleLayout) {
+    return Stack(
+      children: [
+        PageView.builder(
+          controller: _carouselController,
+          onPageChanged: _onCarouselPageChanged,
+          itemCount: _mediaFiles.length,
+          itemBuilder: (context, index) {
+            final file = _mediaFiles[index];
+            final isImage = _isImageFiles[index];
+            final isCurrentPage = index == _currentCarouselIndex;
+            
+            if (isImage) {
+              return Container(
+                width: double.infinity,
+                height: containerHeight,
+                color: Colors.black,
+                child: Center(
+                  child: Image.file(
+                    file,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Icon(
+                          Icons.image_not_supported,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            } else {
+              // Per i video, mostra il player se è la pagina corrente
+              if (isCurrentPage) {
+                // Mostra il video player anche se non è ancora inizializzato (mostrerà un placeholder)
+                return useSimpleLayout
+                    ? _buildSimpleMediaPreview(theme)
+                    : _buildRichMediaPreview(theme);
+              } else {
+                // Placeholder per video non correnti
+                return Container(
+                  width: double.infinity,
+                  height: containerHeight,
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.video_library,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video ${index + 1}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+        ),
+        
+        // Indicatore di pagina (dots) in basso
+        if (_mediaFiles.length > 1)
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _mediaFiles.length,
+                (index) => Container(
+                  width: 8,
+                  height: 8,
+                  margin: EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentCarouselIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        
+        // Pulsante fullscreen per immagini
+        if (_currentIsImage && !_isFullScreen)
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(25),
+              ),
+              child: IconButton(
+                icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
+                onPressed: () {
+                  setState(() {
+                    _isFullScreen = true;
+                  });
+                },
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   // Build header like in about_page.dart
@@ -4220,13 +4553,23 @@ class _UploadConfirmationPageState extends State<UploadConfirmationPage> {
 
   // Metodo per gestire l'aspect ratio delle immagini
   Widget _buildImagePreview() {
+    if (_currentMediaFile == null) {
+      return Center(
+        child: Icon(
+          Icons.image_not_supported,
+          color: Colors.grey[400],
+          size: 48,
+        ),
+      );
+    }
+    
     return Container(
       width: double.infinity,
       height: double.infinity,
       color: Colors.black, // Sfondo nero per immagini che non coprono tutto lo spazio
       child: Center(
         child: Image.file(
-          widget.videoFile,
+          _currentMediaFile!,
           fit: BoxFit.contain, // Mantiene l'aspect ratio originale
           errorBuilder: (context, error, stackTrace) {
             print('Error loading image: $error');

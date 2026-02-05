@@ -81,6 +81,13 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
   late TabController _tabController;
   final PageController _pageController = PageController();
 
+  // Carousel related variables for multi-media (caroselli)
+  List<String> _mediaUrls = [];
+  List<bool> _isImageList = [];
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0;
+  String? _currentVideoUrl; // Track current video URL to avoid re-initializing unnecessarily
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +128,7 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
       _videoPlayerController!.removeListener(_onVideoPositionChanged);
       _videoPlayerController!.dispose();
     }
+    _carouselController?.dispose();
     _tabController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -1755,14 +1763,33 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
   }
 
   Widget _buildFullScreenVideo(ThemeData theme, double mediaWidth, double mediaHeight) {
-    final videoBackgroundColor = Color(0xFF2C3E50).withOpacity(0.9);
+    final videoBackgroundColor = Colors.black;
+    final bool hasMediaUrls = _mediaUrls.isNotEmpty;
     
     return GestureDetector(
       onTap: () {
         print("Tap on fullscreen container");
-        setState(() {
-          _showControls = !_showControls;
-        });
+        // Per immagini e carosello, mostra sempre i controlli quando si tocca
+        // Per video, toggle i controlli
+        if (_isImage || hasMediaUrls) {
+          setState(() {
+            _showControls = true;
+          });
+          // Nascondi i controlli dopo 3 secondi se è un video nel carosello
+          if (hasMediaUrls && _currentCarouselIndex < _isImageList.length && !_isImageList[_currentCarouselIndex] && _videoPlayerController != null && _isVideoInitialized) {
+            Future.delayed(Duration(seconds: 3), () {
+              if (mounted && !_isDisposed && _videoPlayerController != null && _videoPlayerController!.value.isPlaying) {
+                setState(() {
+                  _showControls = false;
+                });
+              }
+            });
+          }
+        } else {
+          setState(() {
+            _showControls = !_showControls;
+          });
+        }
       },
       child: Container(
         width: mediaWidth,
@@ -1770,36 +1797,178 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
         color: videoBackgroundColor,
         child: Stack(
           children: [
-            // Se il video è inizializzato, mostralo
-            if (_isVideoInitialized && _videoPlayerController != null)
+            // Contenuto media in fullscreen
+            if (hasMediaUrls)
+              // Carosello in fullscreen
+              Stack(
+                children: [
+                  _buildCarouselMediaPreview(theme),
+                  // Controlli video per carosello in fullscreen (se il media corrente è un video)
+                  if (_currentCarouselIndex < _isImageList.length && !_isImageList[_currentCarouselIndex] && _videoPlayerController != null && _isVideoInitialized)
+                    AnimatedOpacity(
+                      opacity: _showControls ? 1.0 : 0.0,
+                      duration: Duration(milliseconds: 300),
+                      child: Stack(
+                        children: [
+                          // Overlay semi-trasparente
+                          Container(
+                            width: mediaWidth,
+                            height: mediaHeight,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withOpacity(0.3),
+                                  Colors.transparent,
+                                  Colors.transparent,
+                                  Colors.black.withOpacity(0.4),
+                                ],
+                                stops: [0.0, 0.2, 0.8, 1.0],
+                              ),
+                            ),
+                          ),
+                          // Pulsante Play/Pause al centro
+                          Center(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.4),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: IconButton(
+                                icon: Icon(
+                                  _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 40,
+                                ),
+                                padding: EdgeInsets.all(8),
+                                onPressed: _toggleVideoPlayback,
+                              ),
+                            ),
+                          ),
+                          // Controlli in basso (slider e tempo)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: EdgeInsets.only(top: 20),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    Colors.black.withOpacity(0.6),
+                                    Colors.black.withOpacity(0.2),
+                                    Colors.transparent,
+                                  ],
+                                  stops: [0.0, 0.5, 1.0],
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _formatDuration(_currentPosition),
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatDuration(_videoDuration),
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  SliderTheme(
+                                    data: SliderThemeData(
+                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
+                                      trackHeight: 3,
+                                      trackShape: RoundedRectSliderTrackShape(),
+                                      activeTrackColor: Colors.white,
+                                      inactiveTrackColor: Colors.white.withOpacity(0.3),
+                                      thumbColor: Colors.white,
+                                      overlayColor: theme.colorScheme.primary.withOpacity(0.3),
+                                    ),
+                                    child: Slider(
+                                      value: _currentPosition.inSeconds.toDouble(),
+                                      min: 0.0,
+                                      max: _videoDuration.inSeconds.toDouble() > 0 
+                                          ? _videoDuration.inSeconds.toDouble() 
+                                          : 1.0,
+                                      onChanged: (value) {
+                                        _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
+                                        setState(() {
+                                          _showControls = true;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  SizedBox(height: 2),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              )
+            else if (_isImage)
+              // Immagine singola in fullscreen
+              Center(
+                child: widget.post['media_url'] != null && 
+                     widget.post['media_url'].toString().isNotEmpty
+                     ? _buildImagePreview(widget.post['media_url'])
+                     : _loadCloudflareImage(),
+              )
+            else if (_isVideoInitialized && _videoPlayerController != null)
+              // Video singolo in fullscreen
               Center(
                 child: _buildVideoPlayer(_videoPlayerController!),
               ),
             
-            // Controlli video in modalità fullscreen
+            // Controlli in modalità fullscreen
             AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
+              opacity: (_isImage || hasMediaUrls) ? 1.0 : (_showControls ? 1.0 : 0.0),
               duration: Duration(milliseconds: 300),
               child: Stack(
                 children: [
-                  // Overlay semi-trasparente
-                  Container(
-                    width: mediaWidth,
-                    height: mediaHeight,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withOpacity(0.5),
-                          Colors.transparent,
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.5),
-                        ],
-                        stops: [0.0, 0.2, 0.8, 1.0],
+                  // Overlay semi-trasparente (solo per video)
+                  if (!_isImage && !hasMediaUrls)
+                    Container(
+                      width: mediaWidth,
+                      height: mediaHeight,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.5),
+                            Colors.transparent,
+                            Colors.transparent,
+                            Colors.black.withOpacity(0.5),
+                          ],
+                          stops: [0.0, 0.2, 0.8, 1.0],
+                        ),
                       ),
                     ),
-                  ),
                   
                   // Pulsante per uscire dalla modalità fullscreen
                   Positioned(
@@ -1817,82 +1986,84 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
                     ),
                   ),
                   
-                  // Pulsante Play/Pause al centro
-                  Center(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.5),
-                        shape: BoxShape.circle,
-                      ),
-                      child: IconButton(
-                        icon: Icon(
-                          _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                          size: 48,
+                  // Pulsante Play/Pause al centro (solo per video)
+                  if (!_isImage && !hasMediaUrls && _videoPlayerController != null)
+                    Center(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          shape: BoxShape.circle,
                         ),
-                        padding: EdgeInsets.all(12),
-                        onPressed: _toggleVideoPlayback,
+                        child: IconButton(
+                          icon: Icon(
+                            _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 48,
+                          ),
+                          padding: EdgeInsets.all(12),
+                          onPressed: _toggleVideoPlayback,
+                        ),
                       ),
                     ),
-                  ),
                   
-                  // Progress bar
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [
-                            Colors.black.withOpacity(0.7),
-                            Colors.transparent,
+                  // Progress bar (solo per video singolo)
+                  if (!_isImage && !hasMediaUrls && _videoPlayerController != null)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withOpacity(0.7),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(_currentPosition),
+                                  style: TextStyle(color: Colors.white, fontSize: 14),
+                                ),
+                                Text(
+                                  _formatDuration(_videoDuration),
+                                  style: TextStyle(color: Colors.white, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            SliderTheme(
+                              data: SliderThemeData(
+                                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                trackHeight: 4,
+                                activeTrackColor: Colors.white,
+                                inactiveTrackColor: Colors.white.withOpacity(0.3),
+                                thumbColor: Colors.white,
+                              ),
+                              child: Slider(
+                                value: _currentPosition.inSeconds.toDouble(),
+                                min: 0.0,
+                                max: _videoDuration.inSeconds.toDouble() > 0 
+                                    ? _videoDuration.inSeconds.toDouble() 
+                                    : 1.0,
+                                onChanged: (value) {
+                                  _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
+                                },
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _formatDuration(_currentPosition),
-                                style: TextStyle(color: Colors.white, fontSize: 14),
-                              ),
-                              Text(
-                                _formatDuration(_videoDuration),
-                                style: TextStyle(color: Colors.white, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 8),
-                          SliderTheme(
-                            data: SliderThemeData(
-                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                              trackHeight: 4,
-                              activeTrackColor: Colors.white,
-                              inactiveTrackColor: Colors.white.withOpacity(0.3),
-                              thumbColor: Colors.white,
-                            ),
-                            child: Slider(
-                              value: _currentPosition.inSeconds.toDouble(),
-                              min: 0.0,
-                              max: _videoDuration.inSeconds.toDouble() > 0 
-                                  ? _videoDuration.inSeconds.toDouble() 
-                                  : 1.0,
-                              onChanged: (value) {
-                                _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -2046,6 +2217,519 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
         );
       }
     }
+  }
+  
+  // Initialize network video player for carosello
+  Future<void> _initializeNetworkVideoPlayer(String videoUrl) async {
+    // Dispose previous controller if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+    }
+    
+    setState(() {
+      _isVideoInitialized = false;
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    try {
+      print('Initializing network video player for URL (scheduled_post_details_page): $videoUrl');
+      
+      _videoPlayerController = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: false,
+        ),
+      );
+      
+      _videoPlayerController!.addListener(_onVideoPositionChanged);
+      
+      await _videoPlayerController!.initialize();
+      
+      if (!mounted || _isDisposed) return;
+      
+      setState(() {
+        _isVideoInitialized = true;
+        _videoDuration = _videoPlayerController!.value.duration;
+        _currentPosition = Duration.zero;
+        _showControls = true;
+        _currentVideoUrl = videoUrl;
+      });
+      
+      print('Network video player initialized successfully (scheduled_post_details_page) for URL: $videoUrl');
+    } catch (e) {
+      print('Error initializing network video player (scheduled_post_details_page): $e');
+      
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isVideoInitialized = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to play video: ${e.toString().substring(0, min(e.toString().length, 50))}...'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  // Build carousel media preview (carosello multi-media)
+  Widget _buildCarouselMediaPreview(ThemeData theme) {
+    final mediaUrlsToUse = _mediaUrls;
+    
+    print('_buildCarouselMediaPreview (scheduled_post_details_page) - mediaUrlsToUse.length: ${mediaUrlsToUse.length}');
+    print('_buildCarouselMediaPreview (scheduled_post_details_page) - _carouselController: ${_carouselController != null}');
+    
+    // Get image list directly or compute it
+    List<bool> isImageListToUse;
+    if (_isImageList.length == mediaUrlsToUse.length && _isImageList.isNotEmpty) {
+      isImageListToUse = _isImageList;
+    } else {
+      isImageListToUse = List.generate(mediaUrlsToUse.length, (index) {
+        final url = mediaUrlsToUse[index].toLowerCase();
+        return url.contains('.jpg') ||
+            url.contains('.jpeg') ||
+            url.contains('.png') ||
+            url.contains('.gif') ||
+            url.contains('.webp') ||
+            url.contains('.bmp') ||
+            url.contains('.heic') ||
+            url.contains('.heif');
+      });
+    }
+    
+    // Ensure carousel controller exists
+    if (_carouselController == null && mediaUrlsToUse.isNotEmpty) {
+      _carouselController = PageController(initialPage: 0);
+      print('Created carousel controller on-the-fly (scheduled_post_details_page)');
+    }
+    
+    return Stack(
+      children: [
+        // Carousel with PageView
+        PageView.builder(
+          controller: _carouselController,
+          onPageChanged: mediaUrlsToUse.length > 1 ? _onCarouselPageChanged : null,
+          itemCount: mediaUrlsToUse.length,
+          itemBuilder: (context, index) {
+            final isImage = index < isImageListToUse.length ? isImageListToUse[index] : false;
+            final mediaUrl = mediaUrlsToUse[index];
+            
+            if (isImage) {
+              // Display image directly
+              return Center(
+                child: Image.network(
+                  mediaUrl,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, url, error) => Center(
+                    child: Icon(
+                      Icons.image_not_supported,
+                      color: Colors.grey[400],
+                      size: 48,
+                    ),
+                  ),
+                ),
+              );
+            } else {
+              // Video: usa player di rete, inizializzato solo per elemento corrente
+              if (index == _currentCarouselIndex) {
+                return _buildVideoPlayerWidget(mediaUrl, theme, index == 0);
+              } else {
+                return Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.video_library,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video ${index + 1}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+        ),
+        
+        // Carousel dot indicators (only show if more than 1 item)
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            bottom: 16,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                mediaUrlsToUse.length,
+                (index) => Container(
+                  margin: EdgeInsets.symmetric(horizontal: 4),
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentCarouselIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        
+        // Badge conteggio media in alto a sinistra
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${_currentCarouselIndex + 1}/${mediaUrlsToUse.length}',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        
+        // Pulsante fullscreen per carosello (solo se non è già in fullscreen)
+        if (!_isFullScreen)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: IconButton(
+                icon: Icon(
+                  Icons.fullscreen,
+                  color: Colors.white,
+                  size: 24,
+                ),
+                padding: EdgeInsets.all(4),
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: _toggleFullScreen,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // Handle carousel page change (carosello multi-media)
+  void _onCarouselPageChanged(int index) {
+    setState(() {
+      _currentCarouselIndex = index;
+    });
+    
+    // Dispose previous video player if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+      _isVideoInitialized = false;
+      _currentVideoUrl = null;
+    }
+    
+    // Reset controls - mostra sempre i controlli quando si cambia pagina in fullscreen
+    setState(() {
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    // Initialize video player for current media if it's a video
+    if (index < _mediaUrls.length) {
+      final mediaUrl = _mediaUrls[index];
+      if (mediaUrl != null) {
+        final lower = mediaUrl.toLowerCase();
+        final isImage = lower.contains('.jpg') ||
+            lower.contains('.jpeg') ||
+            lower.contains('.png') ||
+            lower.contains('.gif') ||
+            lower.contains('.webp') ||
+            lower.contains('.bmp') ||
+            lower.contains('.heic') ||
+            lower.contains('.heif');
+        if (!isImage) {
+          _currentVideoUrl = mediaUrl;
+          _initializeNetworkVideoPlayer(mediaUrl).then((_) {
+            // Mostra i controlli quando il video è inizializzato in fullscreen
+            if (mounted && _isFullScreen) {
+              setState(() {
+                _showControls = true;
+              });
+            }
+          });
+        } else {
+          _currentVideoUrl = null;
+          // Per immagini in fullscreen, mantieni i controlli visibili
+          if (mounted && _isFullScreen) {
+            setState(() {
+              _showControls = true;
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Build video player widget for network URL (per singolo elemento del carosello)
+  Widget _buildVideoPlayerWidget(String videoUrl, ThemeData theme, bool isFirstVideo) {
+    // Show loading state while video is initializing or if URL doesn't match
+    if (!_isVideoInitialized ||
+        _videoPlayerController == null ||
+        _currentVideoUrl != videoUrl) {
+      // Show thumbnail while loading only for first video (se disponibile)
+      final thumbnailUrl = isFirstVideo
+          ? (widget.post['thumbnail_url'] as String?)
+          : null;
+      
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+            Center(
+              child: Image.network(
+                thumbnailUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (context, url, error) => Container(
+                  color: Colors.black,
+                ),
+              ),
+            )
+          else
+            Container(color: Colors.black),
+          Container(
+            color: Colors.black.withOpacity(0.3),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Loading video...',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    
+    // Show video player
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _buildVideoPlayer(_videoPlayerController!),
+        
+        // Video Controls
+        AnimatedOpacity(
+          opacity: _showControls ? 1.0 : 0.0,
+          duration: Duration(milliseconds: 300),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isSmallScreen = constraints.maxHeight < 300;
+              
+              return Stack(
+                children: [
+                  // Overlay semi-trasparente
+                  Container(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.3),
+                          Colors.transparent,
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.4),
+                        ],
+                        stops: [0.0, 0.2, 0.8, 1.0],
+                      ),
+                    ),
+                  ),
+                  
+                  // Pulsante Play/Pause al centro
+                  Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                          color: Colors.white,
+                          size: isSmallScreen ? 32 : 40,
+                        ),
+                        padding: EdgeInsets.all(isSmallScreen ? 6 : 8),
+                        onPressed: () {
+                          _toggleVideoPlayback();
+                        },
+                      ),
+                    ),
+                  ),
+                  
+                  // Controlli in alto (fullscreen)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                        padding: EdgeInsets.all(isSmallScreen ? 2 : 4),
+                        constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                        onPressed: _toggleFullScreen,
+                      ),
+                    ),
+                  ),
+                  
+                  // Controlli in basso (slider e tempo)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: EdgeInsets.only(top: 20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.6),
+                            Colors.black.withOpacity(0.2),
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, 0.5, 1.0],
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Time indicators
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(_currentPosition),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  _formatDuration(_videoDuration),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Progress bar
+                          SliderTheme(
+                            data: SliderThemeData(
+                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: isSmallScreen ? 3 : 5),
+                              trackHeight: isSmallScreen ? 2 : 3,
+                              trackShape: RoundedRectSliderTrackShape(),
+                              activeTrackColor: Colors.white,
+                              inactiveTrackColor: Colors.white.withOpacity(0.3),
+                              thumbColor: Colors.white,
+                              overlayColor: theme.colorScheme.primary.withOpacity(0.3),
+                            ),
+                            child: Slider(
+                              value: _currentPosition.inSeconds.toDouble(),
+                              min: 0.0,
+                              max: _videoDuration.inSeconds.toDouble() > 0 
+                                  ? _videoDuration.inSeconds.toDouble() 
+                                  : 1.0,
+                              onChanged: (value) {
+                                _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
+                                setState(() {
+                                  _showControls = true;
+                                });
+                              },
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
   
   // Handle video player events
@@ -2363,7 +3047,9 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
                         platform.toUpperCase(),
                         style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: _getPlatformColor(platform),
+                            color: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                ? Colors.white
+                                : _getPlatformColor(platform),
                         ),
                       ),
                     ],
@@ -2470,7 +3156,9 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
                           onPressed: () => _showPostDetailsBottomSheet(context, account, platform),
                           icon: Icon(Icons.info_outline, size: 20),
                           style: IconButton.styleFrom(
-                            foregroundColor: _getPlatformColor(platform),
+                            foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                ? Colors.white
+                                : _getPlatformColor(platform),
                             backgroundColor: _getPlatformLightColor(platform),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -2746,7 +3434,9 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
   // Show post details bottom sheet
   void _showPostDetailsBottomSheet(BuildContext context, Map<String, dynamic> account, String platform) {
     final theme = Theme.of(context);
-    final platformColor = _getPlatformColor(platform);
+    final platformColor = (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+        ? Colors.white
+        : _getPlatformColor(platform);
     
     // Extract account and post data
     final username = account['username'] as String? ?? '';
@@ -3132,13 +3822,21 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
         return;
       }
 
-      // Costruisci il path Firebase per il post
-      final postId = widget.post['id'] ?? widget.post['key'];
-      if (postId == null) {
+      // Determina userId dal post (se presente) o dall'utente corrente
+      final String userId =
+          (widget.post['user_id'] as String?) ?? currentUser.uid;
+
+      // Costruisci il postId dal post (id, key o unique_post_id)
+      final dynamic rawPostId =
+          widget.post['id'] ?? widget.post['key'] ?? widget.post['unique_post_id'];
+      if (rawPostId == null) {
         return;
       }
+      final String postId = rawPostId.toString();
 
-      final postPath = 'users/users/${currentUser.uid}/scheduled_posts/$postId';
+      final postPath = 'users/users/$userId/scheduled_posts/$postId';
+      print(
+          '[SCHEDULED_POST_DETAILS] Loading post from Firebase path: $postPath');
 
       // Aggiungi timeout per evitare attese troppo lunghe
       final postSnapshot = await FirebaseDatabase.instance
@@ -3333,6 +4031,13 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
 
   // Metodo per costruire la sezione video
   Widget _buildVideoSection(ThemeData theme, double mediaWidth, Color videoBackgroundColor) {
+    // Check if we have media_urls - prioritize media_urls over media_url
+    final bool hasMediaUrls = _mediaUrls.isNotEmpty;
+    final bool hasMultipleMedia = hasMediaUrls && _mediaUrls.length > 1;
+    
+    print('_buildVideoSection (scheduled_post_details_page) - hasMediaUrls: $hasMediaUrls, hasMultipleMedia: $hasMultipleMedia');
+    print('_buildVideoSection (scheduled_post_details_page) - _mediaUrls.length: ${_mediaUrls.length}');
+    
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -3343,19 +4048,23 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
           Expanded(
             child: GestureDetector(
               onTap: () {
+                print("Tap on video section container");
+                // Per i caroselli, i tap sono gestiti internamente al widget del carosello
+                if (!hasMediaUrls) {
                 if (!_isImage && (_videoPlayerController == null || !_isVideoInitialized)) {
                   _toggleVideoPlayback();
                 } else if (!_isImage && _isVideoInitialized) {
                   setState(() {
                     _showControls = !_showControls;
                   });
+                  }
                 }
               },
               child: Container(
                 width: double.infinity,
                 height: double.infinity,
                 decoration: BoxDecoration(
-                  color: videoBackgroundColor,
+                  color: theme.cardColor,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
@@ -3366,15 +4075,42 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Stack(
+                child: hasMediaUrls
+                    ? _buildCarouselMediaPreview(theme)
+                    : Stack(
                   children: [
                     // If it's an image, display it directly
                     if (_isImage)
-                      Center(
-                        child: widget.post['media_url'] != null && 
-                             widget.post['media_url'].toString().isNotEmpty
-                             ? _buildImagePreview(widget.post['media_url'])
-                             : _loadCloudflareImage(),
+                      Stack(
+                        children: [
+                          Center(
+                            child: widget.post['media_url'] != null && 
+                                 widget.post['media_url'].toString().isNotEmpty
+                                 ? _buildImagePreview(widget.post['media_url'])
+                                 : _loadCloudflareImage(),
+                          ),
+                          // Pulsante fullscreen per immagine
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: IconButton(
+                                icon: Icon(
+                                  Icons.fullscreen,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                                padding: EdgeInsets.all(4),
+                                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                                onPressed: _toggleFullScreen,
+                              ),
+                            ),
+                          ),
+                        ],
                       )
                     // Show video player if initialized and it's not an image
                     else if (!_isImage && _isVideoInitialized && _videoPlayerController != null)
@@ -3751,13 +4487,90 @@ class _ScheduledPostDetailsPageState extends State<ScheduledPostDetailsPage> wit
       // Carica i dati da Firebase se necessario
       await _loadPostDataFromFirebase();
       
-      // Inizializza il video player
+      // Gestione carosello: controlla se abbiamo media_urls (lista media)
+      final postDataToCheck = widget.post;
+      final dynamic rawMediaUrls = postDataToCheck['media_urls'];
+      Map<dynamic, dynamic>? mediaUrlsData;
+      if (rawMediaUrls is Map) {
+        mediaUrlsData = rawMediaUrls;
+      } else if (rawMediaUrls is List) {
+        // Converte una lista in mappa indicizzata (0,1,2,...) per compatibilità
+        mediaUrlsData = {
+          for (int i = 0; i < rawMediaUrls.length; i++) i.toString(): rawMediaUrls[i],
+        };
+      } else {
+        mediaUrlsData = null;
+      }
+      
+      print('Checking media_urls in scheduled_post_details_page - keys: ${postDataToCheck.keys.toList()}');
+      print('media_urls raw type: ${rawMediaUrls.runtimeType}, value: $rawMediaUrls');
+      print('media_urls normalized map type: ${mediaUrlsData.runtimeType}, value: $mediaUrlsData');
+      
+      if (mediaUrlsData != null && mediaUrlsData.isNotEmpty) {
+        final normalizedMediaUrlsMap = mediaUrlsData!;
+        print('Found media_urls with ${mediaUrlsData.length} items (scheduled_post_details_page)');
+        
+        // Converti l'oggetto Map in lista ordinata
+        final sortedKeys = mediaUrlsData.keys.toList()..sort((a, b) {
+          final aInt = int.tryParse(a.toString()) ?? 0;
+          final bInt = int.tryParse(b.toString()) ?? 0;
+          return aInt.compareTo(bInt);
+        });
+        
+        // Popola le liste media/immagini
+        _mediaUrls = sortedKeys
+            .map((key) => normalizedMediaUrlsMap[key].toString())
+            .toList();
+        
+        // Heuristica per capire se è immagine o video da estensione URL
+        _isImageList = List.generate(_mediaUrls.length, (index) {
+          final url = _mediaUrls[index].toLowerCase();
+          return url.contains('.jpg') || 
+                 url.contains('.jpeg') || 
+                 url.contains('.png') || 
+                 url.contains('.gif') ||
+                 url.contains('.webp') ||
+                 url.contains('.bmp') ||
+                 url.contains('.heic') ||
+                 url.contains('.heif');
+        });
+        
+        print('Populated _mediaUrls with ${_mediaUrls.length} items, isImageList: $_isImageList (scheduled_post_details_page)');
+        
+        // Inizializza il controller del carosello se abbiamo almeno un media
+        if (_mediaUrls.isNotEmpty) {
+          _carouselController = PageController(initialPage: 0);
+          print('Initialized carousel controller for ${_mediaUrls.length} media (scheduled_post_details_page)');
+        }
+        
+        // Inizializza player per il primo media se è un video
+        if (_mediaUrls.isNotEmpty && !_isImageList[0]) {
+          final firstVideoUrl = _mediaUrls[0];
+          _currentVideoUrl = firstVideoUrl;
+          await _initializeNetworkVideoPlayer(firstVideoUrl);
+        } else if (_mediaUrls.isNotEmpty && _isImageList[0]) {
+          _currentVideoUrl = null;
+        }
+      } else {
+        // Nessun carosello: reset liste
+        _mediaUrls = [];
+        _isImageList = [];
+        
+        // Inizializza il video player per media singolo
       if (!_isImage) {
         _initializePlayer();
       }
+      }
+      
+      // Avvia il timer di aggiornamento posizione solo per i contenuti non carosello
+      if (_mediaUrls.isEmpty) {
       _startPositionUpdateTimer();
       setState(() {
         _showControls = true;
+        });
+      }
+      
+      setState(() {
         _isLoading = false;
       });
     } catch (e) {

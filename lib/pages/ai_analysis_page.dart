@@ -31,7 +31,7 @@ class AnalysisSection {
 }
 
 class ChatGptService {
-  static const String apiKey = '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';
+  static const String apiKey = '';
   static const String apiUrl = 'https://api.openai.com/v1/chat/completions';
 
   // Funzione per calcolare i token utilizzati

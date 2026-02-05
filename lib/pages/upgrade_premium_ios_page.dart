@@ -3,8 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:ui';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:in_app_purchase/in_app_purchase.dart';
@@ -33,9 +31,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   bool _isUserPremium = false; // Se l'utente è premium
   String? _subscriptionStatus; // Status dell'abbonamento
   bool _isUserPremiumFromProfile = false; // Premium dal profilo
-  Map<String, dynamic>? _userLocation; // Localizzazione utente
-  bool _isLocationPermissionGranted = false; // Permessi localizzazione
-  bool _isLocationLoading = false; // Caricamento posizione
+  bool _isDebugUser = false; // Se l'utente è un utente debug
   // In-App Purchases (iOS)
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
@@ -55,6 +51,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   void initState() {
     super.initState();
     _appendIAPLog('🚀 UpgradePremiumIOSPage initialized');
+    _checkDebugUser();
     _loadCurrentUserPlan();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,6 +67,16 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
     _scrollController.dispose();
     _purchaseSub?.cancel();
     super.dispose();
+  }
+
+  void _checkDebugUser() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final debugEmails = ['jacopoberto19@gmail.com', 'giuseppemaria162@gmail.com'];
+      setState(() {
+        _isDebugUser = debugEmails.contains(user.email);
+      });
+    }
   }
 
   void _appendIAPLog(String message) {
@@ -410,31 +417,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
         }
       }
 
-      // Carica la localizzazione dell'utente
-      if (user != null) {
-        try {
-          final locationSnapshot = await FirebaseDatabase.instance
-              .ref()
-              .child('users/users/${user.uid}/profile/location')
-              .get();
-
-          if (locationSnapshot.exists) {
-            setState(() {
-              _userLocation = Map<String, dynamic>.from(locationSnapshot.value as Map);
-              _isLocationPermissionGranted = true;
-            });
-          } else {
-            setState(() {
-              _isLocationPermissionGranted = false;
-            });
-          }
-        } catch (e) {
-          setState(() {
-            _isLocationPermissionGranted = false;
-          });
-        }
-      }
-
       // Verifica stato abbonamento e piano corrente da Realtime Database
       if (user != null) {
         final database = FirebaseDatabase.instance.ref();
@@ -478,98 +460,6 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
     }
   }
 
-  /// Gestisce i permessi di localizzazione e ottiene la posizione dell'utente
-  Future<bool> _handleLocationPermission() async {
-    setState(() {
-      _isLocationLoading = true;
-    });
-
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showErrorSnackBar('Location services are disabled. Please enable them to continue.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          _showErrorSnackBar('Location permission denied.');
-          setState(() {
-            _isLocationLoading = false;
-          });
-          return false;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        _showErrorSnackBar('Location permission permanently denied. Please enable it in settings.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
-      );
-
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks[0];
-        _userLocation = {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'country': place.country ?? '',
-          'state': place.administrativeArea ?? '',
-          'city': place.locality ?? '',
-          'postalCode': place.postalCode ?? '',
-          'street': place.street ?? '',
-          'address': '${place.street ?? ''}, ${place.locality ?? ''}, ${place.administrativeArea ?? ''}, ${place.postalCode ?? ''}, ${place.country ?? ''}'.trim(),
-        };
-
-        setState(() {
-          _isLocationPermissionGranted = true;
-          _isLocationLoading = false;
-        });
-
-        try {
-          final user = FirebaseAuth.instance.currentUser;
-          if (user != null) {
-            await FirebaseDatabase.instance
-                .ref()
-                .child('users/users/${user.uid}/profile/location')
-                .set(_userLocation);
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        return true;
-      } else {
-        _showErrorSnackBar('Unable to get address from location.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error getting location: $e');
-      setState(() {
-        _isLocationLoading = false;
-      });
-      return false;
-    }
-  }
 
   void _showErrorSnackBar(String message) {
     if (mounted) {
@@ -592,7 +482,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
   }
 
   bool _isButtonDisabled() {
-    if (_isLoading || _isLocationLoading) return true;
+    if (_isLoading) return true;
     return false;
   }
 
@@ -899,6 +789,23 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
             bottom: 0,
             child: _buildStickyCTA(context),
           ),
+          // Debug FloatingActionButton - visibile solo per utenti debug
+          if (_isDebugUser)
+            Positioned(
+              right: 16,
+              top: MediaQuery.of(context).size.height * 0.5 - 28, // Centro verticale
+              child: FloatingActionButton(
+                onPressed: _showIAPLogsDialog,
+                backgroundColor: Colors.red.withOpacity(0.8),
+                foregroundColor: Colors.white,
+                mini: true,
+                heroTag: "debug_logs_fab",
+                child: const Icon(
+                  Icons.bug_report,
+                  size: 20,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -917,6 +824,11 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
         'name': 'Basic',
         'price': 'Free',
         'features': [
+          {
+            'text': 'Compare up to 3 videos',
+            'icon': Icons.compare_arrows,
+            'isAvailable': true,
+          },
           {
             'text': 'Videos per day: Limited',
             'icon': Icons.video_library_outlined,
@@ -944,6 +856,11 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
         'price': '€6,99/month',
         'trial': _hasUsedTrial ? null : '3 days free trial',
         'features': [
+          {
+            'text': 'Compare up to 8 videos',
+            'icon': Icons.compare_arrows,
+            'isAvailable': true,
+          },
           {
             'text': 'Videos per day: Unlimited',
             'icon': Icons.video_library,
@@ -980,6 +897,11 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
           {
             'text': '3 months free',
             'icon': Icons.savings,
+            'isAvailable': true,
+          },
+          {
+            'text': 'Compare up to 8 videos',
+            'icon': Icons.compare_arrows,
             'isAvailable': true,
           },
           {
@@ -1311,7 +1233,7 @@ class _UpgradePremiumIOSPageState extends State<UpgradePremiumIOSPage> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: _isLoading || _isLocationLoading
+                        child: _isLoading
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,

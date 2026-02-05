@@ -25,7 +25,9 @@ import './upgrade_premium_page.dart';
 import './upgrade_premium_ios_page.dart';
 
 class SchedulePostPage extends StatefulWidget {
-  final File videoFile;
+  final File? videoFile; // Mantenuto per retrocompatibilità, ma deprecato
+  final List<File>? videoFiles; // Nuova lista di file
+  final List<bool>? isImageFiles; // Nuova lista di flag per immagini
   final String title;
   final String description;
   final Map<String, List<String>> selectedAccounts;
@@ -34,15 +36,18 @@ class SchedulePostPage extends StatefulWidget {
   final VoidCallback onConfirm;
   final Map<String, Map<String, String>> platformDescriptions;
   final String? cloudflareUrl;
-  final bool isImageFile;
+  final bool isImageFile; // Mantenuto per retrocompatibilità
   final Map<String, String> instagramContentType;
   final bool isPremium;
   final String? draftId; // Add draftId
   final File? youtubeThumbnailFile; // Per la miniatura personalizzata di YouTube
+  final Map<String, Map<String, dynamic>>? youtubeOptions; // Opzioni YouTube per ogni account
 
   const SchedulePostPage({
     super.key,
-    required this.videoFile,
+    this.videoFile, // Opzionale per retrocompatibilità
+    this.videoFiles, // Nuova lista di file
+    this.isImageFiles, // Nuova lista di flag
     required this.title,
     required this.description,
     required this.selectedAccounts,
@@ -56,6 +61,7 @@ class SchedulePostPage extends StatefulWidget {
     this.isPremium = false,
     this.draftId, // Add draftId
     this.youtubeThumbnailFile, // Per la miniatura personalizzata di YouTube
+    this.youtubeOptions, // Opzioni YouTube per ogni account
   });
 
   @override
@@ -86,6 +92,14 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
   // Thumbnail path
   String? _thumbnailPath;
   
+  // Variabili per gestire più media
+  List<File> _mediaFiles = [];
+  List<bool> _isImageFiles = [];
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0;
+  File? _currentMediaFile;
+  bool _currentIsImage = false;
+  
   // Platform logos for UI display
   final Map<String, String> _platformLogos = {
     'TikTok': 'assets/loghi/logo_tiktok.png',
@@ -102,10 +116,37 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
   int _userCredits = 0;
   bool _isLoadingCredits = true;
   bool _showCreditsWarning = false;
+  
+  // Variabili per gestione disclaimer (mostrato solo al primo video)
+  bool _showDisclaimer = false;
+  bool _isCheckingVideos = true;
 
   @override
   void initState() {
     super.initState();
+    
+    // Inizializza le liste di media
+    if (widget.videoFiles != null && widget.videoFiles!.isNotEmpty) {
+      _mediaFiles = widget.videoFiles!;
+      _isImageFiles = widget.isImageFiles ?? List.generate(_mediaFiles.length, (index) => false);
+      
+      // Inizializza il carosello se ci sono più file
+      if (_mediaFiles.length > 1) {
+        _carouselController = PageController(initialPage: 0);
+      }
+      
+      // Imposta il media corrente
+      _currentCarouselIndex = 0;
+      _currentMediaFile = _mediaFiles[0];
+      _currentIsImage = _isImageFiles[0];
+    } else if (widget.videoFile != null) {
+      // Retrocompatibilità: usa il singolo file
+      _mediaFiles = [widget.videoFile!];
+      _isImageFiles = [widget.isImageFile];
+      _currentMediaFile = widget.videoFile!;
+      _currentIsImage = widget.isImageFile;
+    }
+    
     if (widget.youtubeThumbnailFile != null) {
       print('***YOUTUBE THUMBNAIL*** schedule_post_page.dart: widget.youtubeThumbnailFile path: \'${widget.youtubeThumbnailFile!.path}\'' );
     } else {
@@ -113,12 +154,12 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     }
     
     // Initialize video player if not an image but with a delay
-    if (!widget.isImageFile) {
+    if (_currentMediaFile != null && !_currentIsImage) {
       // Delay initialization to ensure widget is fully built
       Future.delayed(const Duration(milliseconds: 700), () { // Increased delay
         if (!_isDisposed) {
           // First check if the file is too large before trying anything
-          widget.videoFile.length().then((fileSize) {
+          _currentMediaFile!.length().then((fileSize) {
             final fileSizeMB = fileSize / (1024 * 1024);
             
             if (fileSizeMB > 200) {
@@ -141,11 +182,11 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
           });
         }
       });
-    } else {
+    } else if (_currentMediaFile != null && _currentIsImage) {
       // For image files, just log the file size for debugging
       Future.delayed(const Duration(milliseconds: 300), () {
         if (!_isDisposed) {
-          widget.videoFile.length().then((fileSize) {
+          _currentMediaFile!.length().then((fileSize) {
             final fileSizeMB = fileSize / (1024 * 1024);
             print('Image file size: ${fileSizeMB.toStringAsFixed(2)} MB');
           }).catchError((error) {
@@ -166,6 +207,9 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
         _isLoadingCredits = false;
       });
     }
+    
+    // Controlla se è il primo video per mostrare il disclaimer
+    _checkIfFirstVideo();
   }
   
   void _startPositionUpdateTimer() {
@@ -214,13 +258,66 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     }
   }
   
-  // Metodo per calcolare i crediti necessari per il video
+  // Metodo per controllare se è il primo video (mostra disclaimer solo se la cartella videos non esiste o è vuota)
+  Future<void> _checkIfFirstVideo() async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        setState(() {
+          _isCheckingVideos = false;
+          _showDisclaimer = false;
+        });
+        return;
+      }
+      
+      final videosSnapshot = await _database
+          .child('users')
+          .child('users')
+          .child(currentUser.uid)
+          .child('videos')
+          .get();
+      
+      if (!mounted) return;
+      
+      // Mostra il disclaimer solo se la cartella videos non esiste o è vuota
+      bool shouldShowDisclaimer = false;
+      if (!videosSnapshot.exists) {
+        // La cartella non esiste
+        shouldShowDisclaimer = true;
+      } else {
+        // La cartella esiste, controlla se è vuota
+        final videos = videosSnapshot.value;
+        if (videos == null || (videos is Map && videos.isEmpty)) {
+          shouldShowDisclaimer = true;
+        }
+      }
+      
+      setState(() {
+        _showDisclaimer = shouldShowDisclaimer;
+        _isCheckingVideos = false;
+      });
+    } catch (e) {
+      print('Error checking if first video: $e');
+      // In caso di errore, non mostrare il disclaimer per sicurezza
+      if (mounted) {
+        setState(() {
+          _showDisclaimer = false;
+          _isCheckingVideos = false;
+        });
+      }
+    }
+  }
+  
+  // Metodo per calcolare i crediti necessari per i media
   int _calculateRequiredCredits() {
     try {
-      final fileSize = widget.videoFile.lengthSync();
-      final fileSizeMB = fileSize / (1024 * 1024);
-      final requiredCredits = (fileSizeMB * 0.4).ceil();
-      return requiredCredits;
+      int totalCredits = 0;
+      for (var file in _mediaFiles) {
+        final fileSize = file.lengthSync();
+        final fileSizeMB = fileSize / (1024 * 1024);
+        totalCredits += (fileSizeMB * 0.4).ceil();
+      }
+      return totalCredits > 0 ? totalCredits : 1;
     } catch (e) {
       print('Error calculating required credits: $e');
       return 1; // Default a 1 credito in caso di errore
@@ -440,9 +537,11 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     // Dispose any existing controller first
     _disposeVideoController();
     
+    if (_currentMediaFile == null || _currentIsImage) return;
+    
     try {
       // Check file size before processing to avoid memory issues
-      final fileSize = await widget.videoFile.length();
+      final fileSize = await _currentMediaFile!.length();
       final fileSizeMB = fileSize / (1024 * 1024);
       print('Video file size: ${fileSizeMB.toStringAsFixed(2)} MB');
       
@@ -455,7 +554,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
       // Force a small delay before creating controller to allow memory cleanup
       await Future.delayed(const Duration(milliseconds: 100));
       
-    _videoPlayerController = VideoPlayerController.file(widget.videoFile);
+    _videoPlayerController = VideoPlayerController.file(_currentMediaFile!);
       _videoPlayerController!.setVolume(0.0); // Mute video to save resources
       _videoPlayerController!.setLooping(false); // Don't loop to save memory
       
@@ -523,7 +622,8 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
         !_isDisposed) {
       try {
         // If the video is too large, avoid playing it
-        widget.videoFile.length().then((fileSize) {
+        if (_currentMediaFile == null) return;
+        _currentMediaFile!.length().then((fileSize) {
           final fileSizeMB = fileSize / (1024 * 1024);
           if (fileSizeMB > 120) { // Increased to 120MB to allow more videos
             // Just show a toast/snackbar instead of playing
@@ -628,6 +728,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     _isDisposed = true;
     _positionUpdateTimer?.cancel();
     _controlsHideTimer?.cancel(); // Cancella il timer per i controlli
+    _carouselController?.dispose();
     if (_videoPlayerController != null) {
       _videoPlayerController!.pause();
       _videoPlayerController!.dispose();
@@ -676,6 +777,32 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
 
   Future<void> _saveScheduledPost() async {
     if (_isSaving) return;
+    
+    // Verifica che la data selezionata sia almeno 15 minuti nel futuro
+    final now = DateTime.now();
+    if (widget.scheduledDateTime.isBefore(now.add(const Duration(minutes: 15)))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please select a date and time at least 15 minutes in the future',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          backgroundColor: Colors.white,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          margin: EdgeInsets.all(16),
+          duration: Duration(seconds: 3),
+          elevation: 4,
+        ),
+      );
+      return;
+    }
     
     // Controlla se l'utente ha crediti sufficienti per YouTube (solo per utenti non premium)
     print('DEBUG: Checking credits before scheduling. isPremium=${widget.isPremium}, isLoadingCredits=$_isLoadingCredits');
@@ -754,7 +881,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
       
       // Generate and upload thumbnail if needed
       String? thumbnailUrl;
-      if (!widget.isImageFile && _thumbnailPath == null) {
+      if (!_currentIsImage && _thumbnailPath == null) {
         await _generateThumbnail();
       }
       
@@ -795,11 +922,18 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
           print('DEBUG SCHEDULE_POST_PAGE: primaryPlatform = ' + primaryPlatform);
           // --- FINE LOG ---
           
+          // Usa il media corrente (o il primo) come file principale
+          final File primaryFile = _currentMediaFile ?? (_mediaFiles.isNotEmpty ? _mediaFiles.first : (widget.videoFile!));
+          final bool primaryIsImage = _currentIsImage;
+          
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => PostSchedulerPage(
-                videoFile: widget.videoFile,
+                videoFile: primaryFile,
+                // Passa tutti i media per supportare il carosello / multi-media
+                mediaFiles: _mediaFiles.isNotEmpty ? List<File>.from(_mediaFiles) : null,
+                isImageFiles: _isImageFiles.isNotEmpty ? List<bool>.from(_isImageFiles) : null,
                 title: widget.title,
                 description: widget.description,
                 selectedAccounts: widget.selectedAccounts,
@@ -815,6 +949,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                 },
                 draftId: widget.draftId, // Add draftId
                 youtubeThumbnailFile: widget.youtubeThumbnailFile, // Passa la thumbnail YouTube
+                youtubeOptions: widget.youtubeOptions, // Passa le opzioni YouTube
               ),
             ),
           ).then((result) {
@@ -1180,7 +1315,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     // Check if we should use a simpler layout for large files
     bool useSimpleLayout = false;
     try {
-      if (!widget.isImageFile && _thumbnailPath == null && !_isVideoInitialized) {
+      if (!_currentIsImage && _thumbnailPath == null && !_isVideoInitialized) {
         useSimpleLayout = true;
       }
     } catch (e) {
@@ -1230,7 +1365,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                   child: Stack(
                     children: [
                       // If it's an image, show it fullscreen with black borders
-                      if (widget.isImageFile)
+                      if (_currentIsImage)
                         Center(
                           child: Container(
                             width: mediaWidth,
@@ -1277,7 +1412,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                             
                             // Button to exit fullscreen mode
                             Positioned(
-                              top: 20,
+                              top: 70,
                               left: 20,
                               child: Container(
                                 decoration: BoxDecoration(
@@ -1286,13 +1421,16 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                                 ),
                                 child: IconButton(
                                   icon: Icon(Icons.fullscreen_exit, color: Colors.white),
-                                  onPressed: _toggleFullScreen,
+                                  onPressed: () {
+                                    _pauseVideo();
+                                    _toggleFullScreen();
+                                  },
                                 ),
                               ),
                             ),
                             
                             // Play/Pause button in center only for videos
-                            if (!widget.isImageFile && _isVideoInitialized && _videoPlayerController != null)
+                            if (!_currentIsImage && _isVideoInitialized && _videoPlayerController != null)
                               Center(
                                 child: Container(
                                   decoration: BoxDecoration(
@@ -1312,7 +1450,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                               ),
                             
                             // Progress bar only for videos
-                            if (!widget.isImageFile && _isVideoInitialized && _videoPlayerController != null)
+                            if (!_currentIsImage && _isVideoInitialized && _videoPlayerController != null)
                               Positioned(
                                 left: 0,
                                 right: 0,
@@ -1421,77 +1559,82 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                                 ],
                               ),
                               clipBehavior: Clip.antiAlias,
-                              child: Stack(
-                                children: [
-                                  // Main content (video or image)
-                                  if (widget.isImageFile)
-                                    Stack(
+                              child: _mediaFiles.length > 1
+                                  ? _buildCarouselMediaPreview(theme, videoContainerHeight, useSimpleLayout)
+                                  : Stack(
                                       children: [
-                                        Container(
-                                          width: double.infinity,
-                                          height: videoContainerHeight,
-                                          color: Colors.black,
-                                          child: Center(
-                                            child: Image.file(
-                                              widget.videoFile,
-                                              fit: BoxFit.contain,
-                                              errorBuilder: (context, error, stackTrace) {
-                                                return Center(
-                                                  child: Icon(
-                                                    Icons.image_not_supported,
-                                                    color: Colors.grey[400],
-                                                    size: 48,
+                                        // Main content (video or image)
+                                        if (_currentIsImage)
+                                          Stack(
+                                            children: [
+                                              Container(
+                                                width: double.infinity,
+                                                height: videoContainerHeight,
+                                                color: Colors.black,
+                                                child: Center(
+                                                  child: _currentMediaFile != null
+                                                      ? Image.file(
+                                                          _currentMediaFile!,
+                                                          fit: BoxFit.contain,
+                                                          errorBuilder: (context, error, stackTrace) {
+                                                            return Center(
+                                                              child: Icon(
+                                                                Icons.image_not_supported,
+                                                                color: Colors.grey[400],
+                                                                size: 48,
+                                                              ),
+                                                            );
+                                                          },
+                                                        )
+                                                      : SizedBox(),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                bottom: 12,
+                                                right: 12,
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.black.withOpacity(0.6),
+                                                    borderRadius: BorderRadius.circular(25),
                                                   ),
-                                                );
-                                              },
-                                            ),
-                                          ),
-                                        ),
-                                        Positioned(
-                                          bottom: 12,
-                                          right: 12,
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: Colors.black.withOpacity(0.6),
-                                              borderRadius: BorderRadius.circular(25),
-                                            ),
-                                            child: IconButton(
-                                              icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
-                                              onPressed: () {
-                                                setState(() {
-                                                  _isFullScreen = true;
-                                                });
-                                              },
-                                            ),
-                                          ),
-                                        ),
+                                                  child: IconButton(
+                                                    icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
+                                                    onPressed: () {
+                                                      setState(() {
+                                                        _isFullScreen = true;
+                                                      });
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          )
+                                        else
+                                          useSimpleLayout
+                                              ? _buildSimpleMediaPreview(theme)
+                                              : _buildRichMediaPreview(theme),
                                       ],
-                                    )
-                                  else
-                                    useSimpleLayout
-                                      ? _buildSimpleMediaPreview(theme)
-                                      : _buildRichMediaPreview(theme),
-                                ],
-                              ),
+                                    ),
                             ),
                           ),
                           
-                          // Spacing after media container
-                          SizedBox(height: 16),
+                          // Spacing after media container (ridotto per ridurre gap con account)
+                          SizedBox(height: 0),
                           
                           // Divider before scheduling section
                           Divider(height: 1, thickness: 1, color: theme.colorScheme.surfaceVariant.withOpacity(0.5)),
                           
                           // Scheduling Section with optimized date/time display
                           _buildSchedulingSection(theme),
-                          SizedBox(height: 16),
+                          SizedBox(height: 0),
                           
                           // Selected Accounts Section with improved styling
                           _buildAccountsSection(theme),
                           
                           SizedBox(height: 16),
                           
-                          // Disclaimer con checkbox
+                          // Disclaimer con checkbox (mostrato solo se è il primo video)
+                          if (_showDisclaimer && !_isCheckingVideos)
                           Container(
                             margin: EdgeInsets.symmetric(horizontal: 16),
                             padding: EdgeInsets.all(20),
@@ -1610,15 +1753,16 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
               ),
           ),
           
-          // Floating header
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: _buildHeader(),
+          // Floating header - nasconde quando è in fullscreen
+          if (!_isFullScreen)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: _buildHeader(),
+              ),
             ),
-          ),
         ],
       ),
       // Avviso crediti insufficienti
@@ -1838,13 +1982,23 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
   
   // Method to handle aspect ratio for images
   Widget _buildImagePreview() {
+    if (_currentMediaFile == null) {
+      return Center(
+        child: Icon(
+          Icons.image_not_supported,
+          color: Colors.grey[400],
+          size: 48,
+        ),
+      );
+    }
+    
     return Container(
       width: double.infinity,
       height: double.infinity,
       color: Colors.black, // Sfondo nero per immagini che non coprono tutto lo spazio
       child: Center(
         child: Image.file(
-          widget.videoFile,
+          _currentMediaFile!,
           fit: BoxFit.contain, // Mantiene l'aspect ratio originale
           errorBuilder: (context, error, stackTrace) {
             print('Error loading image: $error');
@@ -1870,13 +2024,13 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              widget.isImageFile ? Icons.photo : Icons.video_library,
+              _currentIsImage ? Icons.photo : Icons.video_library,
               size: 64,
               color: Colors.white,
             ),
             const SizedBox(height: 16),
             Text(
-              widget.isImageFile ? 'Immagine' : 'Video',
+              _currentIsImage ? 'Immagine' : 'Video',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -1901,7 +2055,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                widget.videoFile.path.split('/').last,
+                _currentMediaFile?.path.split('/').last ?? 'Unknown',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -1919,9 +2073,13 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
 
   // Rich media preview with improved video player controls
   Widget _buildRichMediaPreview(ThemeData theme) {
-    return widget.isImageFile 
+    if (_currentMediaFile == null) {
+      return _buildPlaceholder(theme);
+    }
+    
+    return _currentIsImage 
       ? Image.file(
-          widget.videoFile,
+          _currentMediaFile!,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             print('Error loading image: $error');
@@ -2030,7 +2188,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              widget.isImageFile ? Icons.photo : Icons.video_library,
+              _currentIsImage ? Icons.photo : Icons.video_library,
               size: 64,
               color: Colors.white,
             ),
@@ -2042,7 +2200,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                widget.videoFile.path.split('/').last,
+                _currentMediaFile?.path.split('/').last ?? 'Unknown',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
@@ -2055,7 +2213,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              widget.isImageFile ? 'Caricamento immagine...' : 'Caricamento video...',
+              _currentIsImage ? 'Caricamento immagine...' : 'Caricamento video...',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.8),
                 fontSize: 14,
@@ -2064,6 +2222,128 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // Build carousel media preview for multiple media
+  Widget _buildCarouselMediaPreview(ThemeData theme, double containerHeight, bool useSimpleLayout) {
+    return Stack(
+      children: [
+        PageView.builder(
+          controller: _carouselController,
+          onPageChanged: _onCarouselPageChanged,
+          itemCount: _mediaFiles.length,
+          itemBuilder: (context, index) {
+            final file = _mediaFiles[index];
+            final isImage = _isImageFiles[index];
+            final isCurrentPage = index == _currentCarouselIndex;
+            
+            if (isImage) {
+              return Container(
+                width: double.infinity,
+                height: containerHeight,
+                color: Colors.black,
+                child: Center(
+                  child: Image.file(
+                    file,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Icon(
+                          Icons.image_not_supported,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            } else {
+              // Per i video, mostra il player se è la pagina corrente
+              if (isCurrentPage) {
+                // Mostra il video player anche se non è ancora inizializzato (mostrerà un placeholder)
+                return useSimpleLayout
+                    ? _buildSimpleMediaPreview(theme)
+                    : _buildRichMediaPreview(theme);
+              } else {
+                // Placeholder per video non correnti
+                return Container(
+                  width: double.infinity,
+                  height: containerHeight,
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.video_library,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video ${index + 1}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+        ),
+        
+        // Indicatore di pagina (dots) in basso
+        if (_mediaFiles.length > 1)
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _mediaFiles.length,
+                (index) => Container(
+                  width: 8,
+                  height: 8,
+                  margin: EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentCarouselIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        
+        // Pulsante fullscreen per immagini
+        if (_currentIsImage && !_isFullScreen)
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(25),
+              ),
+              child: IconButton(
+                icon: Icon(Icons.fullscreen, color: Colors.white, size: 24),
+                onPressed: () {
+                  setState(() {
+                    _isFullScreen = true;
+                  });
+                },
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -2335,7 +2615,11 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                               platform.toUpperCase(),
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
-                                color: _getPlatformColor(platform),
+                                color: (theme.brightness == Brightness.dark &&
+                                        (platform.toLowerCase() == 'threads' ||
+                                         platform.toLowerCase() == 'tiktok'))
+                                    ? Colors.white
+                                    : _getPlatformColor(platform),
                                 fontSize: 14,
                               ),
                             ),
@@ -2383,6 +2667,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     required String accountId,
     required bool hasCustomDescription,
   }) {
+    final isDark = theme.brightness == Brightness.dark;
     final username = account['username'] as String? ?? '';
     final displayName = account['display_name'] as String? ?? username;
     final profileImageUrl = account['profile_image_url'] as String?;
@@ -2398,6 +2683,11 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     
     // Show details if there's a custom description or if it's YouTube (to show title)
     final bool hasCustomContent = hasCustomDescription || platform.toLowerCase() == 'youtube';
+    
+    // Per Threads e TikTok, usa bianco in dark mode invece di nero per l'icona
+    final iconColor = (platform.toLowerCase() == 'threads' || platform.toLowerCase() == 'tiktok') && isDark
+        ? Colors.white
+        : _getPlatformColor(platform);
     
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -2501,7 +2791,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
               : null,
             icon: Icon(Icons.info_outline, size: 20),
             style: IconButton.styleFrom(
-              foregroundColor: _getPlatformColor(platform),
+              foregroundColor: iconColor,
               backgroundColor: _getPlatformLightColor(platform),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -2517,10 +2807,15 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
   // Method to show custom description dialog
   void _showCustomDescriptionDialog(BuildContext context, String platform, Map<String, dynamic> account, String description) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final username = account['username'] as String? ?? '';
     final displayName = account['display_name'] as String? ?? username;
     final profileImageUrl = account['profile_image_url'] as String?;
     final platformColor = _getPlatformColor(platform);
+    // Per Threads e TikTok, usa bianco in dark mode invece di nero
+    final displayPlatformColor = (platform.toLowerCase() == 'threads' || platform.toLowerCase() == 'tiktok') && isDark
+        ? Colors.white
+        : platformColor;
     
     // Use the proper title
     final accountId = account['id'] as String? ?? '';
@@ -2613,7 +2908,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
                     '$platform Post Details',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: platformColor,
+                      color: displayPlatformColor,
                     ),
                   ),
                   Spacer(),
@@ -2799,15 +3094,44 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
     }
   }
 
+  // Metodo per gestire il cambio di media nel carosello
+  void _onCarouselPageChanged(int index) {
+    if (index < 0 || index >= _mediaFiles.length) return;
+    
+    setState(() {
+      _currentCarouselIndex = index;
+      _currentMediaFile = _mediaFiles[index];
+      _currentIsImage = _isImageFiles[index];
+      
+      // Ferma e dispone il video player corrente
+      if (_videoPlayerController != null) {
+        _videoPlayerController!.pause();
+        _videoPlayerController!.dispose();
+        _videoPlayerController = null;
+        _isVideoInitialized = false;
+        _isVideoPlaying = false;
+      }
+    });
+    
+    // Inizializza il video player per il nuovo media se è un video
+    if (!_currentIsImage) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (!_isDisposed && mounted) {
+          _initializeVideoPlayer();
+        }
+      });
+    }
+  }
+  
   // Generate a thumbnail from the video
   Future<void> _generateThumbnail() async {
-    if (widget.isImageFile || _isDisposed) return;
+    if (_currentIsImage || _isDisposed || _currentMediaFile == null) return;
     
     try {
-      print('Generating thumbnail for: ${widget.videoFile.path}');
+      print('Generating thumbnail for: ${_currentMediaFile!.path}');
       
       // Check file size before processing to avoid memory issues
-      final fileSize = await widget.videoFile.length();
+      final fileSize = await _currentMediaFile!.length();
       final fileSizeMB = fileSize / (1024 * 1024);
       print('Video file size: ${fileSizeMB.toStringAsFixed(2)} MB');
       
@@ -2833,8 +3157,8 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
 
       try {
         // Use video_thumbnail package to generate thumbnail with optimized settings
-        final thumbnailBytes = await VideoThumbnail.thumbnailData(
-          video: widget.videoFile.path,
+      final thumbnailBytes = await VideoThumbnail.thumbnailData(
+        video: _currentMediaFile!.path,
           imageFormat: ImageFormat.JPEG,
           quality: targetQuality,
           maxWidth: targetWidth, // Smaller width for thumbnails
@@ -2882,7 +3206,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
       
       // Use the absolute minimal settings
       final thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: widget.videoFile.path,
+        video: _currentMediaFile!.path,
         thumbnailPath: (await getTemporaryDirectory()).path,
         imageFormat: ImageFormat.JPEG,
         quality: 40,
@@ -2936,7 +3260,7 @@ class _SchedulePostPageState extends State<SchedulePostPage> {
       
       final bytesToSave = compressedBytes ?? thumbnailBytes;
       
-      final fileName = widget.videoFile.path.split('/').last;
+      final fileName = _currentMediaFile?.path.split('/').last ?? 'video';
       final thumbnailFileName = '${fileName.split('.').first}_thumbnail.jpg';
       
       // Get the app's temporary directory

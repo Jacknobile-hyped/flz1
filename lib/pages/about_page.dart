@@ -152,7 +152,7 @@ class _AboutPageState extends State<AboutPage> {
                             ),
                           ),
                           child: Text(
-                            'Your all-in-one platform for social media content management',
+                            'Your all-in-one AI platform for social media content management',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodyLarge?.copyWith(
                               color: isDark ? Colors.white : Colors.black87,

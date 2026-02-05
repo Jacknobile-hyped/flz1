@@ -7,8 +7,6 @@ import '../services/stripe_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'payment_success_page.dart'; // Added import for PaymentSuccessPage
 import 'dart:ui';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
 
 class UpgradePremiumPage extends StatefulWidget {
   const UpgradePremiumPage({super.key, this.suppressExtraPadding = false, this.fromGettingStarted = false});
@@ -33,11 +31,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
   bool _isUserPremium = false; // Variabile per tracciare se l'utente è premium
   String? _subscriptionStatus; // Variabile per tracciare lo status dell'abbonamento
   bool _isUserPremiumFromProfile = false; // Variabile per tracciare se l'utente è premium dal profilo
-  Map<String, dynamic>? _userLocation; // Localizzazione dell'utente per il calcolo delle tasse
-  Map<String, dynamic>? _taxCalculation; // Calcolo delle tasse
-  bool _isCalculatingTax = false; // Stato del calcolo delle tasse
-  bool _isLocationPermissionGranted = false; // Variabile per tracciare se i permessi di localizzazione sono stati concessi
-  bool _isLocationLoading = false; // Variabile per tracciare il caricamento della posizione
 
   @override
   void initState() {
@@ -86,37 +79,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
           });
           print('Utente ha già utilizzato il trial: $_hasUsedTrial');
           print('Utente è premium dal profilo: $_isUserPremiumFromProfile');
-        }
-      }
-      
-      // Carica la localizzazione dell'utente per il calcolo delle tasse
-      if (user != null) {
-        try {
-          final locationSnapshot = await FirebaseDatabase.instance
-              .ref()
-              .child('users/users/${user.uid}/profile/location')
-              .get();
-          
-          if (locationSnapshot.exists) {
-            setState(() {
-              _userLocation = Map<String, dynamic>.from(locationSnapshot.value as Map);
-              _isLocationPermissionGranted = true; // Se la localizzazione esiste nel database, i permessi sono stati concessi
-            });
-            print('Localizzazione utente caricata: $_userLocation');
-            
-            // Calcola le tasse se la localizzazione è disponibile
-            await _calculateTaxForSelectedPlan();
-          } else {
-            print('Nessuna localizzazione trovata per l\'utente');
-            setState(() {
-              _isLocationPermissionGranted = false; // Nessuna localizzazione nel database
-            });
-          }
-        } catch (e) {
-          print('Errore nel caricamento della localizzazione: $e');
-          setState(() {
-            _isLocationPermissionGranted = false; // Errore nel caricamento
-          });
         }
       }
       
@@ -205,102 +167,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
     }
   }
 
-  /// Valida i dati di localizzazione per la tassazione
-  bool _isLocationValidForTax() {
-    if (_userLocation == null) return false;
-    
-    final requiredFields = ['country', 'city', 'state', 'postalCode'];
-    final isValid = requiredFields.every((field) => 
-      _userLocation![field] != null && 
-      _userLocation![field].toString().trim().isNotEmpty
-    );
-    
-    if (isValid) {
-      print('✅ Localizzazione valida per la tassazione: ${_userLocation.toString()}');
-    } else {
-      print('❌ Localizzazione non valida per la tassazione: ${_userLocation.toString()}');
-      print('❌ Campi mancanti: ${requiredFields.where((field) => 
-        _userLocation![field] == null || 
-        _userLocation![field].toString().trim().isEmpty
-      ).toList()}');
-    }
-    
-    return isValid;
-  }
-
-  /// Calcola le tasse per il piano selezionato
-  Future<void> _calculateTaxForSelectedPlan() async {
-    if (!_isLocationValidForTax()) {
-      print('❌ Localizzazione non valida per il calcolo delle tasse');
-      print('❌ Dati disponibili: $_userLocation');
-      setState(() {
-        _taxCalculation = null;
-        _isCalculatingTax = false;
-      });
-      return;
-    }
-
-    // Verifica se i permessi di localizzazione sono stati concessi
-    if (!_isLocationPermissionGranted) {
-      print('❌ Permessi di localizzazione non concessi per il calcolo delle tasse');
-      setState(() {
-        _taxCalculation = null;
-        _isCalculatingTax = false;
-      });
-      return;
-    }
-
-    print('✅ Localizzazione valida per il calcolo delle tasse');
-
-    setState(() {
-      _isCalculatingTax = true;
-    });
-
-    try {
-      // Determina l'importo in base al piano selezionato
-      int amount;
-      if (_selectedPlan == 1) { // Premium mensile
-        amount = 699; // €6.99 in centesimi
-      } else if (_selectedPlan == 2) { // Premium annuale
-        amount = 5999; // €59.99 in centesimi
-      } else {
-        // Piano gratuito, non calcolare tasse
-        setState(() {
-          _taxCalculation = null;
-          _isCalculatingTax = false;
-        });
-        return;
-      }
-
-      print('🔄 Calcolando tasse per importo: €${(amount / 100).toStringAsFixed(2)}');
-      print('🔄 Localizzazione utilizzata: ${_userLocation.toString()}');
-
-      final taxCalculation = await StripeService.calculateTax(
-        amount: amount,
-        currency: 'eur',
-        userLocation: _userLocation!,
-      );
-
-      setState(() {
-        _taxCalculation = taxCalculation;
-        _isCalculatingTax = false;
-      });
-
-      if (taxCalculation != null) {
-        print('✅ Tasse calcolate con successo per piano $_selectedPlan: ${taxCalculation.toString()}');
-        print('✅ Importo tasse: €${(taxCalculation['tax_amount_exclusive'] / 100).toStringAsFixed(2)}');
-        print('✅ Importo totale: €${(taxCalculation['amount_total'] / 100).toStringAsFixed(2)}');
-      } else {
-        print('❌ Errore: Nessun calcolo tasse restituito');
-      }
-    } catch (e) {
-      print('❌ Errore nel calcolo delle tasse: $e');
-      setState(() {
-        _isCalculatingTax = false;
-        _taxCalculation = null;
-      });
-    }
-  }
 
   /// Determina se il piano selezionato è quello corrente dell'utente
   bool _isCurrentPlan(int selectedPlan) {
@@ -314,108 +180,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
     return false;
   }
 
-  /// Gestisce i permessi di localizzazione e ottiene la posizione dell'utente
-  Future<bool> _handleLocationPermission() async {
-    setState(() {
-      _isLocationLoading = true;
-    });
-    
-    try {
-      // Controlla se i servizi di localizzazione sono abilitati
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showErrorSnackBar('I servizi di localizzazione sono disabilitati. Abilitali per continuare.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-      
-      // Controlla i permessi di localizzazione
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          _showErrorSnackBar('Permesso di localizzazione negato. È necessario per calcolare le tasse.');
-          setState(() {
-            _isLocationLoading = false;
-          });
-          return false;
-        }
-      }
-      
-      if (permission == LocationPermission.deniedForever) {
-        _showErrorSnackBar('Permesso di localizzazione negato permanentemente. Vai nelle impostazioni per abilitarlo.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-      
-      // Ottieni la posizione corrente
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 10),
-      );
-      
-      // Ottieni l'indirizzo dalla posizione
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-      
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks[0];
-        _userLocation = {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'country': place.country ?? '',
-          'state': place.administrativeArea ?? '',
-          'city': place.locality ?? '',
-          'postalCode': place.postalCode ?? '',
-          'street': place.street ?? '',
-          'address': '${place.street ?? ''}, ${place.locality ?? ''}, ${place.administrativeArea ?? ''}, ${place.postalCode ?? ''}, ${place.country ?? ''}'.trim(),
-        };
-        
-        setState(() {
-          _isLocationPermissionGranted = true;
-          _isLocationLoading = false;
-        });
-        
-        print('Posizione utente ottenuta: $_userLocation');
-        
-        // Salva la localizzazione nel database per uso futuro
-        try {
-          final user = FirebaseAuth.instance.currentUser;
-          if (user != null) {
-            await FirebaseDatabase.instance
-                .ref()
-                .child('users/users/${user.uid}/profile/location')
-                .set(_userLocation);
-            print('Localizzazione salvata nel database');
-          }
-        } catch (e) {
-          print('Errore nel salvataggio della localizzazione nel database: $e');
-          // Non bloccare il processo se il salvataggio fallisce
-        }
-        
-        return true;
-      } else {
-        _showErrorSnackBar('Impossibile ottenere l\'indirizzo dalla posizione.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-    } catch (e) {
-      print('Errore durante l\'ottenimento della posizione: $e');
-      _showErrorSnackBar('Errore durante l\'ottenimento della posizione: $e');
-      setState(() {
-        _isLocationLoading = false;
-      });
-      return false;
-    }
-  }
 
   /// Mostra un messaggio di errore tramite SnackBar
   void _showErrorSnackBar(String message) {
@@ -441,9 +205,8 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
   /// Determina se il pulsante deve essere disabilitato
   bool _isButtonDisabled() {
     // Disabilita solo durante operazioni in corso
-    if (_isLoading || _isLocationLoading) return true;
+    if (_isLoading) return true;
 
-    // Mai disabilitare in base alla localizzazione: il click farà partire la richiesta permessi
     return false;
   }
 
@@ -539,67 +302,16 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
         // Continua comunque, potrebbe essere già inizializzato
       }
 
-      // Verifica se la localizzazione è disponibile, altrimenti richiedi i permessi
-      Map<String, dynamic>? userLocation = _userLocation;
-      if (userLocation == null || !_isLocationValidForTax()) {
-        print('❌ Localizzazione non disponibile o non valida. Richiedo permessi...');
-        
-        // Richiedi i permessi di localizzazione
-        bool locationGranted = await _handleLocationPermission();
-        if (locationGranted) {
-          // Se i permessi sono stati concessi, usa la nuova localizzazione
-          userLocation = _userLocation;
-          print('✅ Permessi di localizzazione concessi. Nuova localizzazione: $userLocation');
-          
-          // Ricalcola le tasse con la nuova localizzazione
-          await _calculateTaxForSelectedPlan();
-        } else {
-          // Se i permessi non sono stati concessi, non procedere con il pagamento
-          print('❌ Permessi di localizzazione negati. Impossibile procedere con il pagamento.');
-          setState(() {
-            _isLoading = false;
-          });
-          return;
-        }
-      }
-
-      // Usa la localizzazione disponibile
-      if (userLocation != null) {
-        print('✅ Localizzazione utente disponibile: $userLocation');
-        
-        // Verifica che tutti i campi obbligatori siano presenti
-        final requiredFields = ['country', 'city', 'state', 'postalCode'];
-        final missingFields = requiredFields.where((field) => 
-          userLocation![field] == null || 
-          userLocation![field].toString().trim().isEmpty
-        ).toList();
-        
-        if (missingFields.isNotEmpty) {
-          print('⚠️ CAMPI MANCANTI per la tassazione: $missingFields');
-          print('⚠️ Questo causerà l\'errore customer_tax_location_invalid');
-          print('⚠️ Dati disponibili: country=${userLocation!['country']}, city=${userLocation!['city']}, state=${userLocation!['state']}, postalCode=${userLocation!['postalCode']}');
-        } else {
-          print('✅ Tutti i campi di localizzazione sono presenti per la tassazione');
-          print('✅ Dati localizzazione: country=${userLocation!['country']}, city=${userLocation!['city']}, state=${userLocation!['state']}, postalCode=${userLocation!['postalCode']}');
-        }
-      } else {
-        print('❌ Nessuna localizzazione disponibile per l\'utente');
-        print('❌ Questo causerà l\'errore customer_tax_location_invalid');
-        // Non procedere con il pagamento se non c'è localizzazione
-        setState(() {
-          _isLoading = false;
-        });
-        return;
-      }
+      // La localizzazione sarà determinata automaticamente lato server dall'IP
+      print('✅ La localizzazione per la tassazione sarà determinata automaticamente dall\'IP lato server');
       
-      // Presenta il Payment Sheet
+      // Presenta il Payment Sheet (senza userLocation - sarà determinato lato server)
       print('Presentando Payment Sheet...');
       final paymentResult = await StripeService.presentPaymentSheet(
         context: context,
         customerEmail: user.email!,
         planType: _selectedPlan == 1 ? 'monthly' : 'annual',
         hasUsedTrial: _hasUsedTrial,
-        userLocation: userLocation,
       );
 
       if (paymentResult != null && paymentResult['success'] == true) {
@@ -806,6 +518,11 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
         'price': 'Free',
         'features': [
           {
+            'text': 'Compare up to 3 videos',
+            'icon': Icons.compare_arrows,
+            'isAvailable': true,
+          },
+          {
             'text': 'Videos per day: Limited',
             'icon': Icons.video_library_outlined,
             'isAvailable': true,
@@ -816,18 +533,13 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             'isAvailable': true,
           },
           {
-            'text': 'AI Analysis: Not available',
+            'text': 'AI Analysis: Limited',
             'icon': Icons.psychology_outlined,
-            'isAvailable': false,
+            'isAvailable': true,
           },
           {
             'text': 'Priority support: Not available',
             'icon': Icons.support_agent_outlined,
-            'isAvailable': false,
-          },
-          {
-            'text': 'Climate support: Not available',
-            'icon': Icons.eco_outlined,
             'isAvailable': false,
           },
         ],
@@ -837,6 +549,11 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
         'price': '€6,99/month',
         'trial': _hasUsedTrial ? null : '3 days free trial',
         'features': [
+          {
+            'text': 'Compare up to 10 videos',
+            'icon': Icons.compare_arrows,
+            'isAvailable': true,
+          },
           {
             'text': 'Videos per day: Unlimited',
             'icon': Icons.video_library,
@@ -856,14 +573,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             'text': 'Priority support: Premium',
             'icon': Icons.support_agent,
             'isAvailable': true,
-          },
-          {
-            'text': '5% for CO2 reduction',
-            'icon': Icons.eco,
-            'isAvailable': true,
-            'hasLink': true,
-            'linkText': 'see more',
-            'linkUrl': 'https://fluzar.com/climate',
           },
           // Mostra "3 days free trial included" solo se l'utente non ha già utilizzato il trial
           if (!_hasUsedTrial)
@@ -885,6 +594,11 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             'isAvailable': true,
           },
           {
+            'text': 'Compare up to 10 videos',
+            'icon': Icons.compare_arrows,
+            'isAvailable': true,
+          },
+          {
             'text': 'Videos per day: Unlimited',
             'icon': Icons.video_library,
             'isAvailable': true,
@@ -904,14 +618,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
             'icon': Icons.support_agent,
             'isAvailable': true,
           },
-          {
-            'text': '5% for CO2 reduction',
-            'icon': Icons.eco,
-            'isAvailable': true,
-            'hasLink': true,
-            'linkText': 'see more',
-            'linkUrl': 'https://fluzar.com/climate',
-          },
           // Mostra "3 days free trial included" solo se l'utente non ha già utilizzato il trial
           if (!_hasUsedTrial)
             {
@@ -919,11 +625,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
               'icon': Icons.free_breakfast,
               'isAvailable': true,
             },
-          {
-            'text': 'Save 28%',
-            'icon': Icons.savings,
-            'isAvailable': true,
-          },
         ],
       },
     ];
@@ -948,10 +649,6 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
                 }
               });
               
-              // Ricalcola le tasse per il nuovo piano selezionato
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _calculateTaxForSelectedPlan();
-              });
             },
             padEnds: true,
             itemCount: plans.length,
@@ -1244,7 +941,7 @@ class _UpgradePremiumPageState extends State<UpgradePremiumPage> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: _isLoading || _isLocationLoading
+                        child: _isLoading
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,

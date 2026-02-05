@@ -36,7 +36,8 @@ class YouTubeService {
     required String description, 
     required DateTime publishAt,
     required String accountId,
-    List<String> tags = const []
+    List<String> tags = const [],
+    Map<String, dynamic>? youtubeOptions,
   }) async {
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
@@ -81,17 +82,30 @@ class YouTubeService {
       // Creazione dell'API YouTube
       final youtube = YouTubeApi(authClient);
       
-      // Preparazione dei metadati del video
+      // Get YouTube options with defaults
+      final options = youtubeOptions ?? {
+        'categoryId': '22',
+        'privacyStatus': 'private', // Per scheduling deve essere private
+        'license': 'youtube',
+        'notifySubscribers': true,
+        'embeddable': true,
+        'madeForKids': false,
+      };
+      
+      // Preparazione dei metadati del video con opzioni utente
       final video = Video(
         snippet: VideoSnippet(
           title: title,
           description: description,
           tags: tags,
-          categoryId: '22', // Categoria "People & Blogs"
+          categoryId: options['categoryId'] ?? '22',
         ),
         status: VideoStatus(
-          privacyStatus: 'private', // Imposta su private per la programmazione
+          privacyStatus: options['privacyStatus'] ?? 'private', // Per scheduling deve essere private
           publishAt: publishAt.toUtc(), // Formato RFC3339 richiesto dalla documentazione
+          license: options['license'] ?? 'youtube',
+          embeddable: options['embeddable'] ?? true,
+          selfDeclaredMadeForKids: options['madeForKids'] ?? false,
         ),
       );
 

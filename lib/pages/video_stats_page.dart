@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:ui';
 import 'dart:async';
+import 'dart:math';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -2142,6 +2143,9 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
       });
       // --- AGGIUNTA: salva i totali aggregati in Firebase ---
       await _saveAggregatedStatsToFirebase();
+      
+      // Esci dal loop se il caricamento è riuscito
+      break;
       } catch (e) {
         retryCount++;
         print('[STATS] Tentativo $retryCount/$maxRetries fallito: $e');
@@ -2848,7 +2852,13 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
   ),
       bottomNavigationBar: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -2884,31 +2894,6 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
           ),
         ),
       ),
-      // Floating action button per riaprire l'ultima analisi
-      floatingActionButton: _lastAnalysis != null ? FloatingActionButton(
-        heroTag: 'video_stats_fab',
-        onPressed: _showLastAnalysis,
-        backgroundColor: Colors.white,
-        shape: CircleBorder(),
-        child: ShaderMask(
-          shaderCallback: (Rect bounds) {
-            return LinearGradient(
-              colors: [
-                Color(0xFF667eea),
-                Color(0xFF764ba2),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              transform: GradientRotation(135 * 3.14159 / 180),
-            ).createShader(bounds);
-          },
-          child: Icon(
-            Icons.psychology,
-            color: Colors.white,
-          ),
-        ),
-        tooltip: 'Show AI Analysis',
-      ) : null,
     );
   }
   // Add the new header widget based on about_page.dart
@@ -3037,6 +3022,7 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
   final FocusNode _chatFocusNode = FocusNode();
   final List<ChatMessage> _chatMessages = [];
   bool _isChatLoading = false;
+  final Set<String> _completedAIMessageAnimations = {};
   
   // Variabili per i pulsanti delle risposte IA
   Map<int, bool> _aiMessageLikes = {};
@@ -3163,10 +3149,14 @@ class _VideoStatsPageState extends State<VideoStatsPage> with SingleTickerProvid
     // Token limit disabled in favor of credits gating
     
     // Rimuovi il messaggio corrente
+    ChatMessage? removedMessage;
     setState(() {
-      _chatMessages.removeAt(messageIndex);
+      removedMessage = _chatMessages.removeAt(messageIndex);
       _isChatLoading = true;
     });
+    if (removedMessage != null && !removedMessage!.isUser) {
+      _completedAIMessageAnimations.remove(removedMessage!.id);
+    }
     
     try {
       // Rigenera la risposta
@@ -3561,6 +3551,12 @@ These questions should be relevant to your response and help users explore relat
 
   // Metodo per analizzare i dati con l'IA
   Future<void> _analyzeWithAI() async {
+    // Se esiste già un'analisi, apri semplicemente la tendina invece di fare una nuova analisi
+    if (_lastAnalysis != null) {
+      _showLastAnalysis();
+      return;
+    }
+
     // Gating iniziale: per utenti non premium blocca se superato limite giornaliero (>=5) o crediti < 20
     if (!_isPremium) {
       // 1) Daily limit reached (>=5 analisi): mostra tendina daily limit
@@ -4358,7 +4354,13 @@ These questions should be relevant to your response and help users explore relat
       
       // Aggiorna i messaggi chat locali con la nuova analisi e salva su Firebase
       setState(() {
-        _chatMessages.removeWhere((msg) => !msg.isUser && msg.text == fixEncoding(cleanAnalysis));
+        _chatMessages.removeWhere((msg) {
+          final shouldRemove = !msg.isUser && msg.text == fixEncoding(cleanAnalysis);
+          if (shouldRemove) {
+            _completedAIMessageAnimations.remove(msg.id);
+          }
+          return shouldRemove;
+        });
         _chatMessages.add(ChatMessage(
           text: fixEncoding(cleanAnalysis),
           isUser: false,
@@ -4425,6 +4427,7 @@ These questions should be relevant to your response and help users explore relat
           _lastAnalysis = null;
           _lastAnalysisTimestampMinutes = null;
           _chatMessages.clear();
+          _completedAIMessageAnimations.clear();
         });
         
         print('[CLEAR] ✅ Analisi e chat precedenti eliminate da Firebase');
@@ -4488,12 +4491,14 @@ These questions should be relevant to your response and help users explore relat
           setState(() {
             // Aggiorna anche _lastAnalysis per coerenza
             _lastAnalysis = text;
-            _chatMessages.add(ChatMessage(
+            final message = ChatMessage(
               text: text,
               isUser: false,
               timestamp: DateTime.now(),
               suggestedQuestions: suggestedQuestions,
-            ));
+            );
+            _chatMessages.add(message);
+            _completedAIMessageAnimations.add(message.id);
           });
           await _saveChatMessagesToFirebase();
         }
@@ -4501,11 +4506,13 @@ These questions should be relevant to your response and help users explore relat
         final text = fixEncoding(snapshot.value as String);
         setState(() {
           _lastAnalysis = text;
-          _chatMessages.add(ChatMessage(
+          final message = ChatMessage(
             text: text,
             isUser: false,
             timestamp: DateTime.now(),
-          ));
+          );
+          _chatMessages.add(message);
+          _completedAIMessageAnimations.add(message.id);
         });
         await _saveChatMessagesToFirebase();
       }
@@ -4537,8 +4544,10 @@ These questions should be relevant to your response and help users explore relat
                     text: _chatMessages[i].text,
                     isUser: false,
                     timestamp: _chatMessages[i].timestamp,
+                    id: _chatMessages[i].id,
                     suggestedQuestions: suggestedQuestions,
                   );
+                  _completedAIMessageAnimations.add(_chatMessages[i].id);
                   setState(() {}); // Forza il rebuild
                   break;
                 }
@@ -4614,9 +4623,13 @@ These questions should be relevant to your response and help users explore relat
 
   // Metodo per eliminare un messaggio dalla chat
   Future<void> _deleteMessage(int messageIndex) async {
+    ChatMessage? removedMessage;
     setState(() {
-      _chatMessages.removeAt(messageIndex);
+      removedMessage = _chatMessages.removeAt(messageIndex);
     });
+    if (removedMessage != null && !removedMessage!.isUser) {
+      _completedAIMessageAnimations.remove(removedMessage!.id);
+    }
     
     // Salva la conversazione aggiornata nel database Firebase
     await _saveChatMessagesToFirebase();
@@ -4642,6 +4655,7 @@ These questions should be relevant to your response and help users explore relat
             'isUser': message.isUser,
             'timestamp': message.timestamp.millisecondsSinceEpoch,
             'suggestedQuestions': message.suggestedQuestions,
+            'id': message.id,
           };
         }).toList();
         
@@ -4692,6 +4706,7 @@ These questions should be relevant to your response and help users explore relat
           
           setState(() {
             _chatMessages.clear();
+            _completedAIMessageAnimations.clear();
             for (final messageData in messagesData) {
               final Map<String, dynamic> data = Map<String, dynamic>.from(messageData);
               
@@ -4700,12 +4715,17 @@ These questions should be relevant to your response and help users explore relat
                 suggestedQuestions = (data['suggestedQuestions'] as List).cast<String>().map((q) => fixEncoding(q)).toList();
               }
               
-              _chatMessages.add(ChatMessage(
+              final message = ChatMessage(
                 text: fixEncoding(data['text'] ?? ''),
                 isUser: data['isUser'] ?? false,
                 timestamp: DateTime.fromMillisecondsSinceEpoch(data['timestamp'] ?? 0),
+                id: data['id'] as String?,
                 suggestedQuestions: suggestedQuestions,
-              ));
+              );
+              _chatMessages.add(message);
+              if (!message.isUser) {
+                _completedAIMessageAnimations.add(message.id);
+              }
             }
           });
           
@@ -4788,20 +4808,32 @@ These questions should be relevant to your response and help users explore relat
               suggestedQuestions = (data['suggestedQuestions'] as List).cast<String>().map((q) => fixEncoding(q)).toList();
             }
             
-            messages.add(ChatMessage(
+            final message = ChatMessage(
               text: fixEncoding(data['text'] ?? ''),
               isUser: data['isUser'] ?? false,
               timestamp: DateTime.fromMillisecondsSinceEpoch(data['timestamp'] ?? 0),
+              id: data['id'] as String?,
               suggestedQuestions: suggestedQuestions,
-            ));
+            );
+            messages.add(message);
           }
         }
         
         // Aggiorna sempre la lista locale dei messaggi quando arrivano nuovi dati
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
           setState(() {
-            _chatMessages.clear();
-            _chatMessages.addAll(messages);
+            final existingIds = _chatMessages.map((m) => m.id).toSet();
+            _chatMessages
+              ..clear()
+              ..addAll(messages);
+            _completedAIMessageAnimations
+                .removeWhere((id) => !_chatMessages.any((m) => m.id == id));
+            for (final message in _chatMessages) {
+              if (!message.isUser && !existingIds.contains(message.id)) {
+                _completedAIMessageAnimations.add(message.id);
+              }
+            }
           });
         });
         
@@ -4911,11 +4943,13 @@ These questions should be relevant to your response and help users explore relat
       // Assicura che il messaggio di analisi iniziale sia subito visibile nella chat della tendina
       if (!_chatMessages.any((m) => !m.isUser && m.text == _lastAnalysis)) {
         setState(() {
-          _chatMessages.add(ChatMessage(
+          final message = ChatMessage(
             text: _lastAnalysis!,
             isUser: false,
             timestamp: DateTime.now(),
-          ));
+          );
+          _chatMessages.add(message);
+          _completedAIMessageAnimations.add(message.id);
         });
         // Prova a caricare subito le suggested questions da Firebase in background
         _loadSuggestedQuestionsForAnalysis();
@@ -5574,7 +5608,7 @@ These questions should be relevant to your response and help users explore relat
                     );
                   },
                   child: Container(
-                    key: ValueKey('ai_message_${message.timestamp.millisecondsSinceEpoch}'),
+                    key: ValueKey(message.id),
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
@@ -5593,10 +5627,21 @@ These questions should be relevant to your response and help users explore relat
                       ),
                     ],
                   ),
-                  child: _formatAnalysisText(
-                    message.text,
+                  child: ChatTypingAnalysisWidget(
+                    text: message.text,
+                    isCompleted: _completedAIMessageAnimations.contains(message.id),
+                    builder: (partialText) => _formatAnalysisText(
+                      partialText,
                     isDark,
                     Theme.of(context),
+                    ),
+                    onCompleted: () {
+                      if (!_completedAIMessageAnimations.contains(message.id) && mounted) {
+                        setState(() {
+                          _completedAIMessageAnimations.add(message.id);
+                        });
+                      }
+                    },
                   ),
                 ),
                 ),
@@ -5794,7 +5839,10 @@ These questions should be relevant to your response and help users explore relat
                 ),
               );
             },
-            child: (!message.isUser && message.suggestedQuestions != null && message.suggestedQuestions!.isNotEmpty)
+            child: (!message.isUser &&
+                    _completedAIMessageAnimations.contains(message.id) &&
+                    message.suggestedQuestions != null &&
+                    message.suggestedQuestions!.isNotEmpty)
               ? Padding(
                   key: ValueKey('suggested_questions_$messageIndex'),
                   padding: const EdgeInsets.only(left: 28, top: 4, bottom: 4), // allineato ai pulsanti
@@ -5849,6 +5897,7 @@ These questions should be relevant to your response and help users explore relat
                                     text: _chatMessages[messageIndex].text,
                                     isUser: false,
                                     timestamp: _chatMessages[messageIndex].timestamp,
+                                    id: _chatMessages[messageIndex].id,
                                     suggestedQuestions: null,
                                   );
                                 });
@@ -6160,7 +6209,7 @@ These questions should be relevant to your response and help users explore relat
         children: [
           // Title and info section
           Padding(
-            padding: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.only(top: 40, bottom: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -9066,13 +9115,137 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final List<String>? suggestedQuestions; // Domande suggerite per questo messaggio
+  final String id;
   
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
+    String? id,
     this.suggestedQuestions,
-  });
+  }) : id = id ?? '${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(1 << 32)}';
+} 
+
+class ChatTypingAnalysisWidget extends StatefulWidget {
+  final String text;
+  final bool isCompleted;
+  final Widget Function(String partialText) builder;
+  final VoidCallback? onCompleted;
+
+  const ChatTypingAnalysisWidget({
+    Key? key,
+    required this.text,
+    required this.isCompleted,
+    required this.builder,
+    this.onCompleted,
+  }) : super(key: key);
+
+  @override
+  State<ChatTypingAnalysisWidget> createState() => _ChatTypingAnalysisWidgetState();
+}
+
+class _ChatTypingAnalysisWidgetState extends State<ChatTypingAnalysisWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _animation;
+  bool _hasCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: _calculateDuration(widget.text.length),
+    );
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+
+    _hasCompleted = widget.isCompleted || widget.text.isEmpty;
+
+    if (_hasCompleted) {
+      _controller.value = 1;
+    } else {
+      _controller.forward();
+    }
+
+    _controller.addListener(() {
+      if (mounted && !_hasCompleted) {
+        setState(() {});
+      }
+    });
+
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _notifyCompletion();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatTypingAnalysisWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.text != oldWidget.text) {
+      _controller.duration = _calculateDuration(widget.text.length);
+      _hasCompleted = widget.isCompleted || widget.text.isEmpty;
+      if (_hasCompleted) {
+        _controller.value = 1;
+        _notifyCompletion();
+      } else {
+        _controller
+          ..value = 0
+          ..forward();
+      }
+    } else if (widget.isCompleted && !_hasCompleted) {
+      _controller.value = 1;
+      _notifyCompletion();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Duration _calculateDuration(int length) {
+    const minDuration = 1200;
+    const maxDuration = 9000;
+    const perChar = 28;
+    final target = length * perChar;
+    return Duration(
+      milliseconds: max(minDuration, min(maxDuration, target)),
+    );
+  }
+
+  void _notifyCompletion() {
+    if (_hasCompleted) return;
+    _hasCompleted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.onCompleted?.call();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final progress = widget.isCompleted ? 1.0 : _animation.value;
+    final visibleChars = (widget.text.length * progress).clamp(0, widget.text.length).round();
+
+    if (visibleChars <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final partialText = widget.text.substring(0, visibleChars);
+    return widget.builder(partialText);
+  }
 } 
 
 // Funzione per costruire una colonna del BarChart

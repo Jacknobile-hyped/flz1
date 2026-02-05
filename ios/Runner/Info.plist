@@ -27,11 +27,6 @@
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
 	
-	<!-- Permessi per la geolocalizzazione -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Questa app ha bisogno della tua posizione per calcolare correttamente le tasse sui pagamenti premium.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Questa app ha bisogno della tua posizione per calcolare correttamente le tasse sui pagamenti premium.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -141,6 +141,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   Map<String, bool> _showVideoControls = {};
   // Stato interazione barra di progresso per ogni video
   Map<String, bool> _isProgressBarInteracting = {};
+  final Map<String, Map<String, dynamic>> _videoMediaDetailsCache = {};
+  // Controller per i caroselli media nelle card video
+  final Map<String, PageController> _mediaCarouselControllers = {};
+  final Map<String, int> _mediaCarouselIndexes = {};
+  // Controller video dedicati ai caroselli (diversi dall'autoplay principale)
+  final Map<String, VideoPlayerController> _carouselVideoControllers = {};
+  final Map<String, bool> _carouselVideoInitialized = {};
+  final Map<String, bool> _carouselVideoPlaying = {};
 
   // Friend requests
   List<Map<String, dynamic>> _friendRequests = [];
@@ -213,6 +221,23 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     });
   }
   
+  void _restoreDefaultSystemUiStyle() {
+    // Ripristina uno stile coerente con il tema ATTUALE dell'app (non solo quello di sistema),
+    // in linea con quanto fatto in upload_video_page.dart:
+    // - tema chiaro  → status bar e navigation bar bianche, icone scure
+    // - tema scuro   → status bar e navigation bar scure, icone chiare
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark, // Android
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
+  }
+
   void _setupProfileImageListener() {
     if (_targetUserId.isEmpty) return;
     
@@ -310,6 +335,24 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     setState(() {
       _hasChanges = hasTextChanges || hasImageChanges || hasPrivacyChanges;
     });
+  }
+
+  bool _isPublishedVideoData(Map<dynamic, dynamic> data) {
+    if (data['is_draft'] == true || data['isDraft'] == true || data['draft'] == true) {
+      return false;
+    }
+
+    final dynamic statusValue = data['status'] ?? data['Status'] ?? data['video_status'];
+    if (statusValue == null) {
+      return true;
+    }
+
+    final String status = statusValue.toString().toLowerCase();
+    if (status.isEmpty) {
+      return true;
+    }
+
+    return !status.contains('draft');
   }
 
   void _initializeAnimations() {
@@ -448,7 +491,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
       return null;
     } catch (e) {
-      print('Error loading user profile image for $userId: $e');
+      // Error loading user profile image – ignore and fallback
       return null;
     }
   }
@@ -472,7 +515,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         });
       }
     } catch (e) {
-      print('Error loading profile image: $e');
+      // Error loading profile image – ignore silently
     }
   }
   
@@ -496,7 +539,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         });
       }
     } catch (e) {
-      print('Error loading current user profile image: $e');
+      // Error loading current user profile image – ignore silently
     }
   }
 
@@ -515,6 +558,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
 
   @override
   void dispose() {
+    _restoreDefaultSystemUiStyle();
     _fadeAnimationController.dispose();
     _slideAnimationController.dispose();
     _scoreAnimationController.dispose();
@@ -543,6 +587,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     _videoInitialized.clear();
     _videoPlaying.clear();
     _showVideoControls.clear();
+    _videoMediaDetailsCache.clear();
+    
+    _disposeMediaCarousels();
     
     _usernameController.dispose();
     _displayNameController.dispose();
@@ -563,6 +610,53 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     super.dispose();
   }
 
+  @override
+  void deactivate() {
+    // Quando si esce dalla pagina (back o cambio schermata), metti in pausa
+    // tutti i video in riproduzione senza distruggerli, così non continuano
+    // a suonare in background.
+    _videoControllers.forEach((key, controller) {
+      try {
+        if (controller.value.isInitialized && controller.value.isPlaying) {
+          controller.pause();
+          _videoPlaying[key] = false;
+        }
+      } catch (_) {}
+    });
+    _carouselVideoControllers.forEach((key, controller) {
+      try {
+        if (controller.value.isInitialized && controller.value.isPlaying) {
+          controller.pause();
+          _carouselVideoPlaying[key] = false;
+        }
+      } catch (_) {}
+    });
+    super.deactivate();
+  }
+
+  void _disposeMediaCarousels() {
+    _mediaCarouselControllers.values.forEach((controller) {
+      try {
+        controller.dispose();
+      } catch (_) {}
+    });
+    _mediaCarouselControllers.clear();
+    _mediaCarouselIndexes.clear();
+    _disposeAllCarouselVideoControllers();
+  }
+
+  void _disposeAllCarouselVideoControllers() {
+    _carouselVideoControllers.values.forEach((controller) {
+      try {
+        controller.pause();
+        controller.dispose();
+      } catch (_) {}
+    });
+    _carouselVideoControllers.clear();
+    _carouselVideoInitialized.clear();
+    _carouselVideoPlaying.clear();
+  }
+
   // Metodo helper per conversione sicura da dynamic a bool
   bool _safeBoolConversion(dynamic value, bool defaultValue) {
     if (value == null) return defaultValue;
@@ -574,6 +668,93 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       return value != 0;
     }
     return defaultValue;
+  }
+
+  bool _isTruthy(dynamic value) {
+    if (value == null) return false;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' ||
+          normalized == '1' ||
+          normalized == 'yes' ||
+          normalized == 'y';
+    }
+    return false;
+  }
+
+  Future<void> _prefetchVideoMediaDetails(List<Map<String, dynamic>> videos) async {
+    if (videos.isEmpty) return;
+    
+    final List<Future<void>> futures = [];
+    
+    for (final video in videos) {
+      final String? videoId = video['id']?.toString();
+      final String userId = video['userId']?.toString() ?? video['user_id']?.toString() ?? _targetUserId;
+      if (videoId == null || userId.isEmpty) continue;
+      
+      if (_videoMediaDetailsCache.containsKey(videoId)) {
+        _applyMediaDetailsToVideo(video, _videoMediaDetailsCache[videoId]!);
+        continue;
+      }
+      
+      futures.add(_fetchAndCacheVideoMedia(video, videoId, userId));
+    }
+    
+    if (futures.isEmpty) return;
+    
+    await Future.wait(futures);
+  }
+
+  Future<void> _fetchAndCacheVideoMedia(Map<String, dynamic> video, String videoId, String userId) async {
+    try {
+      final snapshot = await _database
+          .child('users')
+          .child('users')
+          .child(userId)
+          .child('videos')
+          .child(videoId)
+          .get();
+      
+      if (!snapshot.exists || snapshot.value is! Map) return;
+      final Map<String, dynamic> data = Map<String, dynamic>.from(
+        (snapshot.value as Map).map((key, value) => MapEntry(key.toString(), value)),
+      );
+      
+      _videoMediaDetailsCache[videoId] = data;
+      _applyMediaDetailsToVideo(video, data);
+    } catch (e) {
+      // Error fetching media details – ignore, we can still use basic video data
+    }
+  }
+
+  void _applyMediaDetailsToVideo(Map<String, dynamic> video, Map<String, dynamic> details) {
+    if (details.containsKey('cloudflare_urls')) {
+      video['cloudflare_urls'] = details['cloudflare_urls'];
+    }
+    if (details.containsKey('is_image')) {
+      video['is_image'] = details['is_image'];
+    }
+    if (details.containsKey('thumbnail_url')) {
+      video['thumbnail_url'] = details['thumbnail_url'];
+    }
+    if (details.containsKey('media_url')) {
+      video['media_url'] = details['media_url'];
+    }
+    if (details.containsKey('thumbnail_path') && (video['thumbnail_path'] == null || (video['thumbnail_path'] as String?)?.isEmpty == true)) {
+      video['thumbnail_path'] = details['thumbnail_path'];
+    }
+    if (details.containsKey('thumbnail_cloudflare_url') && (video['thumbnail_cloudflare_url'] == null || (video['thumbnail_cloudflare_url'] as String?)?.isEmpty == true)) {
+      video['thumbnail_cloudflare_url'] = details['thumbnail_cloudflare_url'];
+    }
+  }
+
+  bool _parseShowViralystScoreSetting(dynamic value) {
+    if (value is String && value == 'isProfilePublic') {
+      return _isProfilePublic;
+    }
+    return _safeBoolConversion(value, true);
   }
 
   // Controlla se l'username è disponibile
@@ -740,7 +921,12 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         int videoCount = 0;
         if (videosSnapshot.exists) {
           final videos = videosSnapshot.value as Map<dynamic, dynamic>;
-          videoCount = videos.length;
+          videoCount = videos.values.where((videoData) {
+            if (videoData is Map) {
+              return _isPublishedVideoData(Map<dynamic, dynamic>.from(videoData));
+            }
+            return true;
+          }).length;
         }
         
         // Carica dati profilo (inclusa immagine)
@@ -754,6 +940,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         Map<String, dynamic> profileData = {};
         String? profileImageUrl = userData['profileImageUrl']; // Fallback al vecchio path
         String? coverImageUrl = userData['coverImageUrl']; // Fallback al vecchio path
+        final dynamic rawShowViralystScore = (profileSnapshot.exists && profileSnapshot.value is Map)
+            ? (profileSnapshot.value as Map<dynamic, dynamic>)['showViralystScore']
+            : null;
         
         if (profileSnapshot.exists) {
           profileData = Map<String, dynamic>.from(profileSnapshot.value as Map<dynamic, dynamic>);
@@ -784,7 +973,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           
           // Impostazioni privacy (caricate dalla cartella profile) - conversione sicura dei tipi
           _isProfilePublic = _safeBoolConversion(profileData['isProfilePublic'], true);
-          _showViralystScore = _safeBoolConversion(profileData['showViralystScore'], true);
+          _showViralystScore = _parseShowViralystScoreSetting(rawShowViralystScore);
           _showVideoCount = _safeBoolConversion(profileData['showVideoCount'], true);
           _showLikeCount = _safeBoolConversion(profileData['showLikeCount'], true);
           _showCommentCount = _safeBoolConversion(profileData['showCommentCount'], true);
@@ -801,7 +990,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           _totalViews = totals['total_views'] ?? 0;
           _totalLikes = totals['total_likes'] ?? 0;
           _totalComments = totals['total_comments'] ?? 0;
-          _viralystScore = _calculateViralystScore(videoCount, totals['total_views'] ?? 0, totals['total_likes'] ?? 0);
+          
+          // Leggi streak_bonuses dal profilo
+          int streakBonuses = 0;
+          if (profileData.containsKey('streak_bonuses')) {
+            final value = profileData['streak_bonuses'];
+            if (value is int) {
+              streakBonuses = value;
+            } else if (value is String) {
+              streakBonuses = int.tryParse(value) ?? 0;
+            }
+          }
+          
+          _viralystScore = _calculateViralystScore(videoCount, totals['total_views'] ?? 0, totals['total_likes'] ?? 0, streakBonuses);
           
           // Aggiorna l'animazione del score
           _updateScoreAnimation();
@@ -828,10 +1029,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     }
   }
   
-  int _calculateViralystScore(int videos, int views, int likes) {
-    // Formula: numero video x 10 + numero like x 0,005 + numero commenti x 0,05
+  int _calculateViralystScore(int videos, int views, int likes, int streakBonuses) {
+    // Formula: numero video x 10 + numero like x 0,005 + numero commenti x 0,05 + streak_bonuses x 100
     // Arrotondare sempre per eccesso al numero naturale maggiore
-    double score = (videos * 10) + (likes * 0.005) + (views * 0.05);
+    double score = (videos * 10) + (likes * 0.005) + (views * 0.05) + (streakBonuses * 100);
     return score.ceil(); // Arrotonda per eccesso
   }
   
@@ -1223,8 +1424,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               friendsList.add(friend);
             }
           } catch (e) {
-            print('Error loading friend profile for $friendId: $e');
-            // Aggiungi comunque l'amico con dati di base
+            // Error loading friend profile – aggiungi comunque l'amico con dati di base
             final friend = {
               'friendId': friendId,
               'uid': friendId,
@@ -1245,8 +1445,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         });
       }
     }, onError: (error) {
-      print('Error loading friends: $error');
-      // Error loading friends
+      // Error loading friends – ignore to avoid breaking the page
       if (mounted) {
         setState(() {
           _friends = [];
@@ -1314,7 +1513,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     if (_isCurrentUserFriend) return true;
     
     // Per tutti gli altri (non-amici), rispetta le impostazioni del proprietario
-    return _showViralystScore;
+    return _isProfilePublic && _showViralystScore;
   }
 
   Future<void> _checkFriendshipStatus() async {
@@ -1647,7 +1846,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       });
 
     } catch (e) {
-      print('Error accepting friend request: $e');
+      // Error accepting friend request
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -1771,7 +1970,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         // Converti i video in una lista con total_likes
         videos.forEach((videoId, videoData) {
           if (videoData is Map) {
-            final video = Map<String, dynamic>.from(videoData);
+            final rawVideo = Map<dynamic, dynamic>.from(videoData);
+            if (!_isPublishedVideoData(rawVideo)) {
+              return;
+            }
+            final video = Map<String, dynamic>.from(rawVideo);
             video['id'] = videoId;
             video['userId'] = _targetUserId; // Aggiungi l'ID dell'utente proprietario del video
             
@@ -1788,10 +1991,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           }
         });
 
-        // Ordina per total_likes decrescente e prendi i primi 5 per risparmiare memoria
+        // Ordina per total_likes decrescente e prendi i primi 3 per risparmiare memoria
         videoList.sort((a, b) => (b['total_likes'] as int).compareTo(a['total_likes'] as int));
-        final topVideos = videoList.take(5).toList();
+        final topVideos = videoList.take(3).toList();
 
+        _disposeMediaCarousels();
+        await _prefetchVideoMediaDetails(topVideos);
+        
         setState(() {
           _topVideos = topVideos;
           _isLoadingTopVideos = false;
@@ -1809,13 +2015,17 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           });
         }
       } else {
+        _disposeMediaCarousels();
+        await _prefetchVideoMediaDetails([]);
         setState(() {
           _topVideos = [];
           _isLoadingTopVideos = false;
         });
       }
     } catch (e) {
-              // Error loading top videos
+      _disposeMediaCarousels();
+      // Error loading top videos
+      await _prefetchVideoMediaDetails([]);
       setState(() {
         _topVideos = [];
         _isLoadingTopVideos = false;
@@ -1846,7 +2056,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         // Converti i video in una lista
         videos.forEach((videoId, videoData) {
           if (videoData is Map) {
-            final video = Map<String, dynamic>.from(videoData);
+            final rawVideo = Map<dynamic, dynamic>.from(videoData);
+            if (!_isPublishedVideoData(rawVideo)) {
+              return;
+            }
+            final video = Map<String, dynamic>.from(rawVideo);
             video['id'] = videoId;
             video['userId'] = _targetUserId; // Aggiungi l'ID dell'utente proprietario del video
             
@@ -1884,7 +2098,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         
         scheduledPosts.forEach((postId, postData) {
           if (postData is Map) {
-            final post = Map<String, dynamic>.from(postData);
+            final rawPost = Map<dynamic, dynamic>.from(postData);
+            if (!_isPublishedVideoData(rawPost)) {
+              return;
+            }
+            final post = Map<String, dynamic>.from(rawPost);
             post['id'] = postId;
             post['userId'] = _targetUserId; // Aggiungi l'ID dell'utente proprietario del post
             
@@ -1906,10 +2124,12 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         });
       }
 
-      // Ordina per timestamp decrescente (più recenti prima) e prendi i primi 5
+      // Ordina per timestamp decrescente (più recenti prima) e prendi i primi 3
       allPosts.sort((a, b) => (b['sort_timestamp'] as int).compareTo(a['sort_timestamp'] as int));
-      final recentPosts = allPosts.take(5).toList();
+      final recentPosts = allPosts.take(3).toList();
 
+      await _prefetchVideoMediaDetails(recentPosts);
+      
       setState(() {
         _recentPosts = recentPosts;
         _isLoadingRecentPosts = false;
@@ -1928,6 +2148,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
     } catch (e) {
               // Error loading recent posts
+      await _prefetchVideoMediaDetails([]);
       setState(() {
         _recentPosts = [];
         _isLoadingRecentPosts = false;
@@ -1944,12 +2165,18 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       final bool isNewFormat = postId.contains(_targetUserId);
       
       String videoUrl = '';
+      String thumbnailUrl = '';
       if (isNewFormat) {
-        // Per il nuovo formato: usa media_url
         videoUrl = post['media_url'] ?? '';
+        thumbnailUrl = post['thumbnail_url'] ?? post['media_url'] ?? '';
       } else {
-        // Per il vecchio formato: usa video_path o cloudflare_url
         videoUrl = post['video_path'] ?? post['cloudflare_url'] ?? '';
+        thumbnailUrl = post['thumbnail_path'] ?? post['thumbnail_cloudflare_url'] ?? post['thumbnail_url'] ?? '';
+      }
+      final carouselMediaUrls = _getCarouselMediaUrls(Map<String, dynamic>.from(post));
+      final bool isPhotoMedia = _isPhotoMedia(videoUrl, thumbnailUrl, Map<String, dynamic>.from(post), carouselMediaUrls: carouselMediaUrls);
+      if (isPhotoMedia || carouselMediaUrls.isNotEmpty) {
+        continue;
       }
       
       if (videoUrl.isNotEmpty) {
@@ -1991,12 +2218,18 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       final bool isNewFormat = videoId.contains(_targetUserId);
       
       String videoUrl = '';
+      String thumbnailUrl = '';
       if (isNewFormat) {
-        // Per il nuovo formato: usa media_url
         videoUrl = video['media_url'] ?? '';
+        thumbnailUrl = video['thumbnail_url'] ?? video['media_url'] ?? '';
       } else {
-        // Per il vecchio formato: usa video_path o cloudflare_url
         videoUrl = video['video_path'] ?? video['cloudflare_url'] ?? '';
+        thumbnailUrl = video['thumbnail_path'] ?? video['thumbnail_cloudflare_url'] ?? video['thumbnail_url'] ?? '';
+      }
+      final carouselMediaUrls = _getCarouselMediaUrls(Map<String, dynamic>.from(video));
+      final bool isPhotoMedia = _isPhotoMedia(videoUrl, thumbnailUrl, Map<String, dynamic>.from(video), carouselMediaUrls: carouselMediaUrls);
+      if (isPhotoMedia || carouselMediaUrls.isNotEmpty) {
+        continue;
       }
       
       if (videoUrl.isNotEmpty) {
@@ -2137,7 +2370,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           _showVideoControls[postId] = false; // Inizialmente nascondi i controlli
         });
       } catch (e) {
-        print('Error initializing video controller for recent post $postId: $e');
+        // Error initializing video controller for recent post – ignore
       }
     }
   }
@@ -2154,6 +2387,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         controller.seekTo(Duration.zero);
       }
     });
+    _pauseAllCarouselVideos(triggerRebuild: false);
     
     // Gestisci i controller in modo dinamico
     _manageVideoControllers(newPageIndex);
@@ -2241,7 +2475,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           _showVideoControls[videoId] = false; // Inizialmente nascondi i controlli
         });
       } catch (e) {
-        print('Error initializing video controller for $videoId: $e');
+        // Error initializing video controller – ignore
       }
     }
   }
@@ -2320,7 +2554,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
     } catch (e) {
               // Error picking profile image
-      _showErrorSnackBar('Errore nella selezione dell\'immagine profilo');
+      _showErrorSnackBar('Error selecting profile image');
     }
   }
   
@@ -2341,7 +2575,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
     } catch (e) {
               // Error picking cover image
-      _showErrorSnackBar('Errore nella selezione dell\'immagine di copertina');
+      _showErrorSnackBar('Error selecting cover image');
     }
   }
 
@@ -2462,7 +2696,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
     } catch (e) {
               // Error uploading profile image
-      _showErrorSnackBar('Errore nel caricamento dell\'immagine profilo');
+      _showErrorSnackBar('Error loading profile picture');
       return _currentProfileImageUrl;
     } finally {
       setState(() {
@@ -2476,19 +2710,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
 
     // Controlla se l'username è valido
     if (_usernameController.text.trim().isEmpty) {
-      _showErrorSnackBar('Username è obbligatorio');
+      _showErrorSnackBar('Username is required');
       return;
     }
 
     // Controlla se l'username è disponibile
     if (!_isUsernameAvailable) {
-      _showErrorSnackBar('Username non disponibile. Scegline un altro.');
+      _showErrorSnackBar('Username not available.');
       return;
     }
 
     // Se l'username è in fase di controllo, aspetta
     if (_isCheckingUsername) {
-      _showErrorSnackBar('Attendi il controllo dell\'username...');
+      _showErrorSnackBar('Wait for username verification...');
       return;
     }
 
@@ -2553,7 +2787,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             final isFirstTimeSetup = _userData['onboardingCompleted'] != true;
             if (isFirstTimeSetup) {
               await EmailService.sendWelcomeEmail(_currentUser!.email!, displayName);
-              print('Email di benvenuto inviata con successo a: ${_currentUser!.email!}');
               
               // Marca l'onboarding come completato
               await _database
@@ -2565,10 +2798,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             }
           }
         }
-      } catch (e) {
-        print('Errore nell\'invio email di benvenuto: $e');
-        // Non bloccare il salvataggio del profilo se l'email fallisce
-      }
+    } catch (e) {
+      // Errore nell'invio email di benvenuto – non bloccare il salvataggio del profilo
+    }
 
       // Reset delle modifiche e delle immagini selezionate
       setState(() {
@@ -2595,7 +2827,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       // Non tornare alla pagina precedente, rimani nella pagina corrente
     } catch (e) {
               // Error saving profile
-      _showErrorSnackBar('Errore nel salvataggio del profilo');
+      _showErrorSnackBar('Error saving profile');
     } finally {
       setState(() {
         _isSaving = false;
@@ -2719,7 +2951,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
     } catch (e) {
               // Error uploading cover image
-      _showErrorSnackBar('Errore nel caricamento dell\'immagine di copertina');
+      _showErrorSnackBar('Error uploading cover image');
       return _currentCoverImageUrl;
     } finally {
       setState(() {
@@ -3206,6 +3438,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     final isDark = theme.brightness == Brightness.dark;
     
     return Container(
+      height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -3262,6 +3495,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // Freccia indietro + logo Fluzar (stile header AI)
               Row(
                 children: [
                   IconButton(
@@ -3270,7 +3504,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       color: theme.brightness == Brightness.dark ? Colors.white : Colors.black87,
                       size: 22,
                     ),
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      // Ripristina subito i colori corretti di status/navigation bar
+                      _restoreDefaultSystemUiStyle();
+                      Navigator.pop(context);
+                    },
                   ),
                   ShaderMask(
                     shaderCallback: (Rect bounds) {
@@ -3297,31 +3535,63 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   ),
                 ],
               ),
-              // Pulsante salva solo per il proprietario e solo se ci sono modifiche
-              if (_isOwner && _hasChanges)
-                _isSaving
-                    ? Container(
-                        width: 40,
-                        height: 40,
-                        child: Center(
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF6C63FF)),
-                            ),
+              // Lato destro: badge stile "AI Insights" + pulsante salva (solo owner e se ci sono modifiche)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6C63FF).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.person,
+                          size: 14,
+                          color: const Color(0xFF6C63FF),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _isOwner ? 'My Profile' : 'Profile',
+                          style: TextStyle(
+                            color: const Color(0xFF6C63FF),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
                           ),
                         ),
-                      )
-                    : IconButton(
-                        icon: Icon(
-                          Icons.save,
-                          color: theme.brightness == Brightness.dark ? Colors.white : Colors.black87,
-                      size: 22,
+                      ],
                     ),
-                    onPressed: _saveProfile,
                   ),
+                  if (_isOwner && _hasChanges) const SizedBox(width: 8),
+                  if (_isOwner && _hasChanges)
+                    _isSaving
+                        ? SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF6C63FF)),
+                                ),
+                              ),
+                            ),
+                          )
+                        : IconButton(
+                            icon: Icon(
+                              Icons.save,
+                              color: theme.brightness == Brightness.dark ? Colors.white : Colors.black87,
+                              size: 22,
+                            ),
+                            onPressed: _saveProfile,
+                          ),
+                ],
+              ),
             ],
           ),
         ),
@@ -3969,20 +4239,60 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     
 
     
-    return Container(
-      padding: EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 15,
-            offset: Offset(0, 8),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            // Effetto vetro semi-trasparente opaco
+            color: isDark 
+                ? Colors.white.withOpacity(0.15) 
+                : Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(20),
+            // Bordo con effetto vetro
+            border: Border.all(
+              color: isDark 
+                  ? Colors.white.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.4),
+              width: 1,
+            ),
+            // Ombre per effetto sospeso
+            boxShadow: [
+              BoxShadow(
+                color: isDark 
+                    ? Colors.black.withOpacity(0.4)
+                    : Colors.black.withOpacity(0.15),
+                blurRadius: isDark ? 25 : 20,
+                spreadRadius: isDark ? 1 : 0,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.white.withOpacity(0.6),
+                blurRadius: 2,
+                spreadRadius: -2,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            // Gradiente sottile per effetto vetro
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark 
+                  ? [
+                      Colors.white.withOpacity(0.2),
+                      Colors.white.withOpacity(0.1),
+                    ]
+                  : [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.2),
+                    ],
+            ),
           ),
-        ],
-      ),
-      child: Row(
+          child: Row(
         children: [
           // Prima colonna - Video count
           Expanded(
@@ -3994,7 +4304,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           Container(
             width: 1,
             height: 40,
-            color: Colors.grey.withOpacity(0.3),
+            color: isDark ? Colors.white.withOpacity(0.2) : Colors.white.withOpacity(0.3),
           ),
           // Seconda colonna - Like count
           Expanded(
@@ -4006,7 +4316,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           Container(
             width: 1,
             height: 40,
-            color: Colors.grey.withOpacity(0.3),
+            color: isDark ? Colors.white.withOpacity(0.2) : Colors.white.withOpacity(0.3),
           ),
           // Terza colonna - Commenti
           Expanded(
@@ -4015,6 +4325,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               : _buildLockedStatItem(Icons.comment, 'Comments'),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -4390,7 +4702,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   ).createShader(bounds);
                 },
                 child: Text(
-                        'Top 5 Most Liked',
+                        'Top 3 Most Liked',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -4805,13 +5117,20 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     
     // Ottieni l'URL del thumbnail
     String thumbnailUrl = '';
+    // Ottieni anche l'URL media per determinare se è una foto
+    String videoUrl = '';
     if (isNewFormat) {
       // Per il nuovo formato: usa media_url
       thumbnailUrl = post['media_url'] ?? '';
+      videoUrl = post['media_url'] ?? '';
     } else {
       // Per il vecchio formato: usa thumbnail_path o thumbnail_cloudflare_url
       thumbnailUrl = post['thumbnail_path'] ?? post['thumbnail_cloudflare_url'] ?? '';
+      videoUrl = post['video_path'] ?? post['cloudflare_url'] ?? '';
     }
+    // Determina se il post è una immagine per mostrare il badge foto
+    final List<String> carouselMediaUrls = _getCarouselMediaUrls(Map<String, dynamic>.from(post));
+    final bool isPhotoMedia = _isPhotoMedia(videoUrl, thumbnailUrl, Map<String, dynamic>.from(post), carouselMediaUrls: carouselMediaUrls);
     
     // Formatta la data
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
@@ -4843,6 +5162,12 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               child: _buildRecentPostContent(postId, thumbnailUrl),
             ),
           ),
+          if (isPhotoMedia)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: _buildPhotoBadge(),
+            ),
           
           // Pulsante commenti sotto alla stella
           Positioned(
@@ -5077,25 +5402,39 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                       color: Colors.white.withOpacity(0.8),
                     ),
                   ),
-                  // Progress bar sotto alla data
-                  SizedBox(height: 6),
+                  // Progress bar sotto alla data (solo se la durata del video è valida > 0)
                   Builder(
                     builder: (_) {
                       final controller = _videoControllers[postId];
-                      if (controller == null) return SizedBox.shrink();
-                      return SizedBox(
+                      if (controller == null) return const SizedBox.shrink();
+                      final durationMs = controller.value.duration?.inMilliseconds ?? 0;
+                      if (durationMs <= 0) {
+                        // Nessuna durata valida: non mostrare la progress bar
+                        return const SizedBox.shrink();
+                      }
+                      return Column(
+                        children: [
+                          const SizedBox(height: 6),
+                          SizedBox(
                         height: 18,
                         child: ValueListenableBuilder<VideoPlayerValue>(
                           valueListenable: controller,
                           builder: (context, value, child) {
-                            final currentPosition = value.position.inMilliseconds.toDouble();
-                            final videoDuration = value.duration?.inMilliseconds.toDouble() ?? 1.0;
-                            final clampedValue = currentPosition.clamp(0.0, videoDuration);
+                                final currentPosition =
+                                    value.position.inMilliseconds.toDouble();
+                                final videoDuration =
+                                    value.duration?.inMilliseconds.toDouble() ?? 0.0;
+                                if (videoDuration <= 0) {
+                                  return const SizedBox.shrink();
+                                }
+                                final clampedValue =
+                                    currentPosition.clamp(0.0, videoDuration);
                             return Row(
                               children: [
                                 // Minutaggio corrente (sinistra)
                                 Text(
-                                  _formatDuration(Duration(milliseconds: currentPosition.toInt())),
+                                      _formatDuration(Duration(
+                                          milliseconds: currentPosition.toInt())),
                                   style: TextStyle(
                                     fontSize: 9,
                                     color: Colors.white.withOpacity(0.8),
@@ -5106,31 +5445,47 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                                 Expanded(
                                   child: SliderTheme(
                                     data: SliderThemeData(
-                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 0),
-                                      trackHeight: (_isProgressBarInteracting[postId] == true) ? 12 : 6,
+                                          thumbShape:
+                                              const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 0),
+                                          trackHeight:
+                                              (_isProgressBarInteracting[postId] ==
+                                                      true)
+                                                  ? 12
+                                                  : 6,
                                       activeTrackColor: Colors.white,
-                                      inactiveTrackColor: Colors.white.withOpacity(0.3),
+                                          inactiveTrackColor:
+                                              Colors.white.withOpacity(0.3),
                                       thumbColor: Colors.transparent,
                                       overlayColor: Colors.transparent,
-                                      trackShape: RoundedRectSliderTrackShape(),
+                                          trackShape:
+                                              const RoundedRectSliderTrackShape(),
                                     ),
                                     child: Slider(
                                       value: clampedValue,
                                       min: 0.0,
-                                      max: videoDuration > 0 ? videoDuration : 1.0,
+                                          max: videoDuration,
                                       onChanged: (v) {
-                                        controller.seekTo(Duration(milliseconds: v.toInt()));
-                                        setState(() { _isProgressBarInteracting[postId] = true; });
+                                            controller.seekTo(Duration(
+                                                milliseconds: v.toInt()));
+                                            setState(() {
+                                              _isProgressBarInteracting[postId] =
+                                                  true;
+                                            });
                                       },
                                       onChangeEnd: (v) {
-                                        setState(() { _isProgressBarInteracting[postId] = false; });
+                                            setState(() {
+                                              _isProgressBarInteracting[postId] =
+                                                  false;
+                                            });
                                       },
                                     ),
                                   ),
                                 ),
                                 // Minutaggio totale (destra)
                                 Text(
-                                  _formatDuration(Duration(milliseconds: videoDuration.toInt())),
+                                      _formatDuration(Duration(
+                                          milliseconds: videoDuration.toInt())),
                                   style: TextStyle(
                                     fontSize: 9,
                                     color: Colors.white.withOpacity(0.8),
@@ -5141,6 +5496,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                             );
                           },
                         ),
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -5327,14 +5684,28 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     String thumbnailUrl = '';
     String videoUrl = '';
     if (isNewFormat) {
-      // Per il nuovo formato: usa media_url
-      thumbnailUrl = video['media_url'] ?? '';
+      // Per il nuovo formato: privilegia thumbnail_url se presente, altrimenti media_url
+      thumbnailUrl = video['thumbnail_url'] ?? video['media_url'] ?? '';
       videoUrl = video['media_url'] ?? '';
     } else {
       // Per il vecchio formato: usa thumbnail_path o thumbnail_cloudflare_url
-      thumbnailUrl = video['thumbnail_path'] ?? video['thumbnail_cloudflare_url'] ?? '';
+      thumbnailUrl = video['thumbnail_path'] ?? video['thumbnail_cloudflare_url'] ?? video['thumbnail_url'] ?? '';
       videoUrl = video['video_path'] ?? video['cloudflare_url'] ?? '';
     }
+    final List<String> carouselMediaUrls = _getCarouselMediaUrls(video);
+    final bool hasCarouselMedia = carouselMediaUrls.isNotEmpty;
+    final bool isPhotoMedia = _isPhotoMedia(videoUrl, thumbnailUrl, video, carouselMediaUrls: carouselMediaUrls);
+    
+    // Debug prints rimossi per evitare flood di log
+    final double starTop = isPhotoMedia ? 48 : 8;
+    final double commentTop = isPhotoMedia ? 90 : 50;
+    final double menuTop = isPhotoMedia ? 140 : 100;
+    final bool showVideoProgress = !hasCarouselMedia && !isPhotoMedia;
+    final Widget mediaContent = hasCarouselMedia
+        ? _buildCarouselMediaViewer(videoId, carouselMediaUrls)
+        : isPhotoMedia
+            ? _buildPhotoMedia(thumbnailUrl, videoUrl)
+            : _buildVideoContent(videoId, videoUrl, thumbnailUrl);
     
     return Container(
       width: 200,
@@ -5359,16 +5730,21 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: _buildVideoContent(videoId, videoUrl, thumbnailUrl),
+              child: mediaContent,
             ),
           ),
+          if (isPhotoMedia)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: _buildPhotoBadge(),
+          ),
           
-
           
           // Pulsante stella in alto a destra (solo se visibile)
           if (_shouldShowPrivateStats())
           Positioned(
-            top: 8,
+            top: starTop,
             right: 8,
             child: GestureDetector(
               onTap: () => _handleVideoStar(video),
@@ -5429,7 +5805,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           
           // Pulsante commenti sotto alla stella
           Positioned(
-            top: 50,
+            top: commentTop,
             right: 8,
                           child: GestureDetector(
                 onTap: () => _handleVideoComment(video),
@@ -5483,7 +5859,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           
           // Pulsante menu (tre puntini)
           Positioned(
-            top: 100,
+            top: menuTop,
             right: 8,
             child: GestureDetector(
               onTap: () => _showVideoOptions(video),
@@ -5601,71 +5977,76 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   ),
                   // Progress bar sotto alla data
                   SizedBox(height: 6),
-                  Builder(
-                    builder: (_) {
-                      final controller = _videoControllers[videoId];
-                      if (controller == null) return SizedBox.shrink();
-                      return SizedBox(
-                        height: 18,
-                        child: ValueListenableBuilder<VideoPlayerValue>(
-                          valueListenable: controller,
-                          builder: (context, value, child) {
-                            final currentPosition = value.position.inMilliseconds.toDouble();
-                            final videoDuration = value.duration?.inMilliseconds.toDouble() ?? 1.0;
-                            final clampedValue = currentPosition.clamp(0.0, videoDuration);
-                            return Row(
-                              children: [
-                                // Minutaggio corrente (sinistra)
-                                Text(
-                                  _formatDuration(Duration(milliseconds: currentPosition.toInt())),
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: Colors.white.withOpacity(0.8),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                // Progress bar al centro
-                                Expanded(
-                                  child: SliderTheme(
-                                    data: SliderThemeData(
-                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 0),
-                                      trackHeight: (_isProgressBarInteracting[videoId] == true) ? 12 : 6,
-                                      activeTrackColor: Colors.white,
-                                      inactiveTrackColor: Colors.white.withOpacity(0.3),
-                                      thumbColor: Colors.transparent,
-                                      overlayColor: Colors.transparent,
-                                      trackShape: RoundedRectSliderTrackShape(),
-                                    ),
-                                    child: Slider(
-                                      value: clampedValue,
-                                      min: 0.0,
-                                      max: videoDuration > 0 ? videoDuration : 1.0,
-                                      onChanged: (v) {
-                                        controller.seekTo(Duration(milliseconds: v.toInt()));
-                                        setState(() { _isProgressBarInteracting[videoId] = true; });
-                                      },
-                                      onChangeEnd: (v) {
-                                        setState(() { _isProgressBarInteracting[videoId] = false; });
-                                      },
+                  if (showVideoProgress)
+                    Builder(
+                      builder: (_) {
+                        final controller = _videoControllers[videoId];
+                        if (controller == null) return SizedBox.shrink();
+                        return SizedBox(
+                          height: 18,
+                          child: ValueListenableBuilder<VideoPlayerValue>(
+                            valueListenable: controller,
+                            builder: (context, value, child) {
+                              final currentPosition = value.position.inMilliseconds.toDouble();
+                              final videoDuration = value.duration?.inMilliseconds.toDouble() ?? 1.0;
+                              if (videoDuration <= 0) {
+                                // Nessuna durata valida: non mostrare la progress bar
+                                return const SizedBox.shrink();
+                              }
+                              final clampedValue = currentPosition.clamp(0.0, videoDuration);
+                              return Row(
+                                children: [
+                                  // Minutaggio corrente (sinistra)
+                                  Text(
+                                    _formatDuration(Duration(milliseconds: currentPosition.toInt())),
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: Colors.white.withOpacity(0.8),
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                ),
-                                // Minutaggio totale (destra)
-                                Text(
-                                  _formatDuration(Duration(milliseconds: videoDuration.toInt())),
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: Colors.white.withOpacity(0.8),
-                                    fontWeight: FontWeight.w500,
+                                  // Progress bar al centro
+                                  Expanded(
+                                    child: SliderTheme(
+                                      data: SliderThemeData(
+                                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 0),
+                                        trackHeight: (_isProgressBarInteracting[videoId] == true) ? 12 : 6,
+                                        activeTrackColor: Colors.white,
+                                        inactiveTrackColor: Colors.white.withOpacity(0.3),
+                                        thumbColor: Colors.transparent,
+                                        overlayColor: Colors.transparent,
+                                          trackShape: const RoundedRectSliderTrackShape(),
+                                      ),
+                                      child: Slider(
+                                        value: clampedValue,
+                                        min: 0.0,
+                                          max: videoDuration,
+                                        onChanged: (v) {
+                                          controller.seekTo(Duration(milliseconds: v.toInt()));
+                                          setState(() { _isProgressBarInteracting[videoId] = true; });
+                                        },
+                                        onChangeEnd: (v) {
+                                          setState(() { _isProgressBarInteracting[videoId] = false; });
+                                        },
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      );
-                    },
-                  ),
+                                  // Minutaggio totale (destra)
+                                  Text(
+                                    _formatDuration(Duration(milliseconds: videoDuration.toInt())),
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: Colors.white.withOpacity(0.8),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
                 ],
               ),
             ),
@@ -5674,6 +6055,326 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       ),
     );
   }
+
+  List<String> _getCarouselMediaUrls(Map<String, dynamic> video) {
+    final urls = <String>[];
+    final seen = <String>{};
+
+    void addUrl(String? rawUrl) {
+      if (rawUrl == null) return;
+      final normalized = rawUrl.trim();
+      if (normalized.isEmpty) return;
+      if (seen.add(normalized)) {
+        urls.add(normalized);
+      }
+    }
+
+    void extract(dynamic source) {
+      if (source == null) return;
+      if (source is List) {
+        for (final item in source) {
+          extract(item);
+        }
+      } else if (source is Map) {
+        source.values.forEach(extract);
+      } else if (source is String) {
+        addUrl(source);
+      } else {
+        addUrl(source.toString());
+      }
+    }
+
+    extract(video['cloudflare_urls']);
+
+    if (urls.isEmpty) {
+      extract(video['media_urls']);
+    }
+    if (urls.isEmpty) {
+      extract(video['media']);
+    }
+
+    return urls;
+  }
+
+  Widget _buildCarouselMediaViewer(String videoId, List<String> mediaUrls) {
+    if (mediaUrls.isEmpty) {
+      return _buildVideoPlaceholder();
+    }
+
+    final int itemCount = mediaUrls.length;
+    final int storedIndex = _mediaCarouselIndexes[videoId] ?? 0;
+    final int safeIndex = _clampCarouselIndex(storedIndex, itemCount);
+    _mediaCarouselIndexes[videoId] = safeIndex;
+
+    final controller = _mediaCarouselControllers.putIfAbsent(
+      videoId,
+      () => PageController(initialPage: safeIndex),
+    );
+
+    if (controller.hasClients) {
+      final currentPage = controller.page?.round() ?? controller.initialPage;
+      if (currentPage != safeIndex) {
+        controller.jumpToPage(safeIndex);
+      }
+    }
+
+    final int currentIndex = _mediaCarouselIndexes[videoId] ?? 0;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: controller,
+          physics: const BouncingScrollPhysics(),
+          itemCount: itemCount,
+          onPageChanged: (index) {
+            final previousIndex = _mediaCarouselIndexes[videoId] ?? 0;
+            if (previousIndex != index) {
+              _pauseCarouselVideo(videoId, previousIndex);
+            }
+            setState(() {
+              _mediaCarouselIndexes[videoId] = index;
+            });
+          },
+          itemBuilder: (context, index) {
+            final mediaUrl = mediaUrls[index];
+            if (_isImageUrl(mediaUrl)) {
+              return _buildCarouselImageItem(mediaUrl);
+            }
+            return _buildCarouselVideoItem(videoId, index, mediaUrl);
+          },
+        ),
+        if (itemCount > 1)
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${currentIndex + 1}/$itemCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        if (itemCount > 1)
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                itemCount,
+                (index) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: currentIndex == index ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(3),
+                    color: currentIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCarouselImageItem(String mediaUrl) {
+    return Container(
+      color: Colors.black,
+      child: Image.network(
+        mediaUrl,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return const Center(
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) => _buildVideoPlaceholder(),
+      ),
+    );
+  }
+
+  Widget _buildCarouselVideoItem(String videoId, int index, String mediaUrl) {
+    final controllerKey = _carouselVideoControllerKey(videoId, index);
+    VideoPlayerController? controller = _carouselVideoControllers[controllerKey];
+
+    if (controller == null) {
+      controller = VideoPlayerController.network(mediaUrl);
+      _carouselVideoControllers[controllerKey] = controller;
+      _carouselVideoInitialized[controllerKey] = false;
+      _carouselVideoPlaying[controllerKey] = false;
+
+      controller
+        ..setLooping(true)
+        ..setVolume(0.0);
+
+      controller.initialize().then((_) {
+        if (!mounted) return;
+        setState(() {
+          _carouselVideoInitialized[controllerKey] = true;
+        });
+      }).catchError((error) {
+        // Error initializing carousel video – ignore
+      });
+    }
+
+    final bool isInitialized = _carouselVideoInitialized[controllerKey] ?? false;
+    final bool isPlaying = _carouselVideoPlaying[controllerKey] ?? false;
+
+    return GestureDetector(
+      onTap: () => _toggleCarouselVideoPlayback(controllerKey),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(
+            color: Colors.black,
+            child: isInitialized
+                ? FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: controller!.value.size.width,
+                      height: controller.value.size.height,
+                      child: VideoPlayer(controller),
+                    ),
+                  )
+                : const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+          ),
+          AnimatedOpacity(
+            opacity: isPlaying ? 0.0 : 1.0,
+            duration: const Duration(milliseconds: 200),
+            child: Center(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.4),
+                    width: 1.2,
+                  ),
+                ),
+                padding: const EdgeInsets.all(8),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 32,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _carouselVideoControllerKey(String videoId, int index) => '${videoId}_carousel_$index';
+
+  int _clampCarouselIndex(int index, int length) {
+    if (length <= 0) return 0;
+    if (index < 0) return 0;
+    if (index >= length) return length - 1;
+    return index;
+  }
+
+  void _toggleCarouselVideoPlayback(String controllerKey) {
+    final controller = _carouselVideoControllers[controllerKey];
+    if (controller == null || !(_carouselVideoInitialized[controllerKey] ?? false)) {
+      return;
+    }
+
+    final bool isPlaying = _carouselVideoPlaying[controllerKey] ?? false;
+
+    if (isPlaying) {
+      controller.pause();
+      setState(() {
+        _carouselVideoPlaying[controllerKey] = false;
+      });
+    } else {
+      _pauseAllCarouselVideos(triggerRebuild: false);
+      controller.play();
+      setState(() {
+        _carouselVideoPlaying[controllerKey] = true;
+      });
+    }
+  }
+
+  void _pauseCarouselVideo(String videoId, int index) {
+    final key = _carouselVideoControllerKey(videoId, index);
+    final controller = _carouselVideoControllers[key];
+    if (controller != null && controller.value.isPlaying) {
+      controller.pause();
+      _carouselVideoPlaying[key] = false;
+    }
+  }
+
+  void _pauseAllCarouselVideos({bool triggerRebuild = true}) {
+    bool shouldUpdate = false;
+    _carouselVideoControllers.forEach((key, controller) {
+      if (controller.value.isPlaying) {
+        controller.pause();
+        _carouselVideoPlaying[key] = false;
+        shouldUpdate = true;
+      }
+    });
+    if (shouldUpdate && triggerRebuild && mounted) {
+      setState(() {});
+    }
+  }
+
+  bool _isImageUrl(String url) {
+    final lower = url.toLowerCase();
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif', '.bmp'];
+    return imageExtensions.any((ext) => lower.endsWith(ext));
+  }
+  Widget _buildPhotoMedia(String primaryUrl, String fallbackUrl) {
+    final displayUrl = primaryUrl.isNotEmpty ? primaryUrl : fallbackUrl;
+    if (displayUrl.isEmpty) {
+      return _buildVideoPlaceholder();
+    }
+
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.black,
+      child: Image.network(
+        displayUrl,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Center(
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return _buildVideoPlaceholder();
+        },
+      ),
+    );
+  }
+
   Widget _buildVideoContent(String videoId, String videoUrl, String thumbnailUrl) {
     final controller = _videoControllers[videoId];
     final isInitialized = _videoInitialized[videoId] == true;
@@ -5790,6 +6491,72 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         size: 24,
       ),
     );
+  }
+
+  Widget _buildPhotoBadge() {
+    return Container(
+      padding: EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white.withOpacity(0.3),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Icon(
+        Icons.photo_outlined,
+        color: Colors.white,
+        size: 16,
+      ),
+    );
+  }
+
+  bool _isPhotoMedia(String videoUrl, String thumbnailUrl, Map<String, dynamic> media, {List<String>? carouselMediaUrls}) {
+    if (_isTruthy(media['is_image']) || _isTruthy(media['is_photo'])) {
+      return true;
+    }
+
+    final dynamic mediaTypeRaw = media['media_type'] ?? media['mediaType'] ?? media['type'];
+    final String mediaType = mediaTypeRaw?.toString().toLowerCase() ?? '';
+    if (mediaType.contains('image') || mediaType.contains('photo')) {
+      return true;
+    }
+
+    List<String> inferredCarouselUrls = carouselMediaUrls ?? const [];
+    if (inferredCarouselUrls.isEmpty) {
+      inferredCarouselUrls = _getCarouselMediaUrls(Map<String, dynamic>.from(media));
+    }
+
+    if (inferredCarouselUrls.isNotEmpty && inferredCarouselUrls.every(_isImageUrl)) {
+      return true;
+    }
+
+    final String lowerVideoUrl = videoUrl.toLowerCase();
+    final String lowerThumbnailUrl = thumbnailUrl.toLowerCase();
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif', '.bmp'];
+
+    bool hasImageExtension(String url) {
+      if (url.isEmpty) return false;
+      return imageExtensions.any((ext) => url.endsWith(ext));
+    }
+
+    if (hasImageExtension(lowerVideoUrl)) {
+      return true;
+    }
+
+    if (lowerVideoUrl.isEmpty && hasImageExtension(lowerThumbnailUrl)) {
+      return true;
+    }
+
+    return false;
   }
   
   Widget _buildViralystScoreFixed(ThemeData theme) {
@@ -6383,7 +7150,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                 
                 // Descrizione per visitatori
                 Text(
-                  'The Fluzar Score is a measure of social media success and consistency. It increases based on:',
+                  'The Fluzar Score is a measure of social media success and consistency.',
                   style: TextStyle(
                     fontSize: 16,
                     color: Theme.of(context).textTheme.bodyMedium?.color,
@@ -7894,7 +8661,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               // Stelle aggiornate per il commento
       
     } catch (e) {
-      print('Errore nell\'aggiornamento delle stelle del commento: $e');
+      // Errore nell'aggiornamento delle stelle del commento
       // In caso di errore, ricarica i dati dal database per sincronizzare
       if (mounted) {
         try {
@@ -7917,7 +8684,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             });
           }
         } catch (refreshError) {
-          print('Errore nel refresh del commento: $refreshError');
+          // Errore nel refresh del commento – ignora
         }
       }
     }
@@ -8045,7 +8812,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               // Stelle aggiornate per la risposta
       
     } catch (e) {
-      print('Errore nell\'aggiornamento delle stelle della risposta: $e');
+      // Errore nell'aggiornamento delle stelle della risposta
       // In caso di errore, ricarica i dati dal database per sincronizzare
       if (mounted) {
         try {
@@ -8070,7 +8837,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             });
           }
         } catch (refreshError) {
-          print('Errore nel refresh della risposta: $refreshError');
+          // Errore nel refresh della risposta – ignora
         }
       }
     }
@@ -8220,17 +8987,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                 Map<dynamic, dynamic>? commentsData;
                 if (rawComments is Map) {
                   commentsData = rawComments;
-                  print('[COMMENTS] Loaded as Map: ${commentsData.length} comments');
                 } else if (rawComments is List) {
                   // iOS Firebase can return lists for arrays; convert to map with index as key
                   commentsData = {
                     for (int i = 0; i < rawComments.length; i++)
                       if (rawComments[i] != null) i.toString(): rawComments[i]
                   };
-                  print('[COMMENTS] Loaded as List (iOS): ${commentsData.length} comments');
                 } else {
                   commentsData = null;
-                  print('[COMMENTS] Unexpected data type: ${rawComments.runtimeType}');
                 }
                 if (commentsData == null || commentsData.isEmpty) {
                   return Center(
@@ -8373,7 +9137,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                           vertical: 10,
                         ),
                       ),
-                      maxLength: 200,
+                      maxLength: 120,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(120),
+                      ],
                       buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                     ),
                   ),
@@ -8736,7 +9503,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       await commentRef.set(commentData).timeout(
         Duration(seconds: 10),
         onTimeout: () {
-          print('[COMMENT] Timeout nel salvataggio del commento');
           throw TimeoutException('Timeout nel salvataggio del commento', Duration(seconds: 10));
         },
       );
@@ -8768,7 +9534,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         );
       }
     } catch (e) {
-      print('Errore nel salvataggio del commento: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -8973,7 +9738,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       final commentId = comment['id'] ?? '';
       
       if (videoId.isEmpty || commentId.isEmpty) {
-        print('Errore: videoId o commentId mancanti');
+        // videoId o commentId mancanti – esci in silenzio
         return;
       }
       
@@ -9005,7 +9770,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         );
       }
     } catch (e) {
-      print('Errore nella cancellazione del commento: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -9111,12 +9875,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                               ? Colors.grey[800] 
                               : Colors.white,
                           borderRadius: BorderRadius.circular(25),
-                          border: Border.all(
-                            color: replyFocusNode.hasFocus 
-                                ? Color(0xFF667eea) 
-                                : Colors.grey[300]!,
-                            width: 1,
-                          ),
                         ),
                         child: TextField(
                           controller: replyController,
@@ -9136,6 +9894,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                               vertical: 10,
                             ),
                           ),
+                          maxLength: 120,
+                          inputFormatters: [
+                            LengthLimitingTextInputFormatter(120),
+                          ],
+                          buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                         ),
                       ),
                     ),
@@ -9224,7 +9987,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       await replyRef.set(replyData).timeout(
         Duration(seconds: 10),
         onTimeout: () {
-          print('[REPLY] Timeout nel salvataggio della reply');
           throw TimeoutException('Timeout nel salvataggio della reply', Duration(seconds: 10));
         },
       );
@@ -9248,8 +10010,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       
       // Incrementa il conteggio
       await parentCommentRef.child('replies_count').set(currentRepliesCount + 1);
-      
-      print('Risposta salvata per il commento $parentCommentId');
       
       // Mostra feedback
       if (mounted) {
@@ -9275,7 +10035,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       }
       
     } catch (e) {
-      print('Errore nel salvataggio della risposta: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -9548,17 +10307,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   Map<dynamic, dynamic>? repliesData;
                   if (rawReplies is Map) {
                     repliesData = rawReplies;
-                    print('[REPLIES] Loaded as Map: ${repliesData.length} replies');
                   } else if (rawReplies is List) {
                     // iOS Firebase can return lists for arrays; convert to map with index as key
                     repliesData = {
                       for (int i = 0; i < rawReplies.length; i++)
                         if (rawReplies[i] != null) i.toString(): rawReplies[i]
                     };
-                    print('[REPLIES] Loaded as List (iOS): ${repliesData.length} replies');
                   } else {
                     repliesData = null;
-                    print('[REPLIES] Unexpected data type: ${rawReplies.runtimeType}');
                   }
                   
                   if (repliesData == null || repliesData.isEmpty) {
@@ -9683,10 +10439,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                             ? Colors.grey[800] 
                             : Colors.white,
                         borderRadius: BorderRadius.circular(25),
-                        border: Border.all(
-                          color: Colors.grey[300]!,
-                          width: 1,
-                        ),
                       ),
                       child: TextField(
                         controller: replyController,
@@ -9706,6 +10458,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                             vertical: 10,
                           ),
                         ),
+                        maxLength: 120,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(120),
+                        ],
+                        buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                         onSubmitted: (text) async {
                           if (text.trim().isNotEmpty) {
                             await _submitReply(parentComment, videoUserId, text.trim());
@@ -10282,7 +11039,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           }
         }
       } catch (e) {
-        print('Errore nel recupero dati utente $userId: $e');
         // Aggiungi un utente con dati di fallback
         users.add({
           'uid': userId,
@@ -10512,7 +11268,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         );
       }
     } catch (e) {
-      print('Errore nella cancellazione della risposta: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -10969,7 +11724,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       
       return {'likes': 0, 'comments': 0};
     } catch (e) {
-      print('Errore nel recupero dei totali del video: $e');
       return {'likes': 0, 'comments': 0};
     }
   }
@@ -11010,10 +11764,18 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       Map<String, List<Map<String, dynamic>>> socialAccounts = {};
       
       if (isNewFormat) {
-        // Formato nuovo: accounts in sottocartelle
+        // Formato nuovo: accounts in sottocartelle (scheduled_posts -> videos)
         final platforms = ['Facebook', 'Instagram', 'YouTube', 'Threads', 'TikTok', 'Twitter'];
         for (final platform in platforms) {
-          final platformRef = _database
+          final scheduledPlatformRef = _database
+              .child('users')
+              .child('users')
+              .child(userId)
+              .child('scheduled_posts')
+              .child(videoId)
+              .child('accounts')
+              .child(platform);
+          final videosPlatformRef = _database
               .child('users')
               .child('users')
               .child(userId)
@@ -11022,7 +11784,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
               .child('accounts')
               .child(platform);
           
-          final accounts = await _fetchAccountsFromSubfolders(platformRef);
+          List<Map<String, dynamic>> accounts = await _fetchAccountsFromSubfolders(scheduledPlatformRef);
+          if (accounts.isEmpty) {
+            accounts = await _fetchAccountsFromSubfolders(videosPlatformRef);
+          }
           if (accounts.isNotEmpty) {
             socialAccounts[platform] = accounts;
           }
@@ -11062,7 +11827,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       
       return socialAccounts;
     } catch (e) {
-      print('Error loading social accounts: $e');
       return {};
     }
   }
@@ -11073,17 +11837,47 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     List<Map<String, dynamic>> accounts = [];
     if (snapshot.exists && snapshot.value is Map) {
       final data = snapshot.value as Map<dynamic, dynamic>;
-      for (final entry in data.entries) {
-        final value = entry.value;
-        if (value is Map && value.isNotEmpty) {
-          accounts.add(Map<String, dynamic>.from(value));
+      // Se è un oggetto diretto dell'account
+      final bool looksLikeSingleAccount = data.containsKey('account_username') ||
+          data.containsKey('account_display_name') ||
+          data.containsKey('account_id') ||
+          data.containsKey('youtube_video_id') ||
+          data.containsKey('media_id') ||
+          data.containsKey('post_id');
+      if (looksLikeSingleAccount) {
+        final account = Map<String, dynamic>.from(data);
+        if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+            account['youtube_video_id'] != null &&
+            account['youtube_video_id'].toString().isNotEmpty) {
+          account['post_id'] = account['youtube_video_id'].toString();
+        }
+        accounts.add(account);
+      } else {
+        // Altrimenti è una mappa di sotto-nodi account
+        for (final entry in data.entries) {
+          final value = entry.value;
+          if (value is Map && value.isNotEmpty) {
+            final account = Map<String, dynamic>.from(value);
+            if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+                account['youtube_video_id'] != null &&
+                account['youtube_video_id'].toString().isNotEmpty) {
+              account['post_id'] = account['youtube_video_id'].toString();
+            }
+            accounts.add(account);
+          }
         }
       }
     } else if (snapshot.exists && snapshot.value is List) {
       final data = snapshot.value as List<dynamic>;
       for (final value in data) {
         if (value is Map && value.isNotEmpty) {
-          accounts.add(Map<String, dynamic>.from(value));
+          final account = Map<String, dynamic>.from(value);
+          if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+              account['youtube_video_id'] != null &&
+              account['youtube_video_id'].toString().isNotEmpty) {
+            account['post_id'] = account['youtube_video_id'].toString();
+          }
+          accounts.add(account);
         }
       }
     }
@@ -11095,7 +11889,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
     final displayName = account['account_display_name']?.toString() ?? account['display_name']?.toString() ?? '';
     final username = account['username']?.toString();
     String? url;
-    print('[INSTAGRAM] Richiesta link per displayName=$displayName');
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
@@ -11111,20 +11904,38 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Instagram/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Instagram');
-            final videoAccountsSnap = await videoAccountsRef.get();
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db.child('users').child('users').child(userId).child('scheduled_posts').child(videoId).child('accounts').child('Instagram');
+            var videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Instagram');
+              videoAccountsSnap = await videoAccountsRef.get();
+            }
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, può essere oggetto diretto, mappa indicizzata o lista
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                if (accountDisplayName == displayName) {
-                  mediaId = videoAccounts['media_id']?.toString();
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  // Oggetto diretto
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  if (accountDisplayName == displayName) {
+                    mediaId = videoAccounts['media_id']?.toString();
+                    accountId = videoAccounts['account_id']?.toString();
+                  }
+                } else {
+                  // Mappa indicizzata
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      if (accountDisplayName == displayName) {
+                        mediaId = accountData['media_id']?.toString();
+                        accountId = accountData['account_id']?.toString();
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
                 // Caso: più account per piattaforma (lista di oggetti)
@@ -11134,7 +11945,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     if (accountDisplayName == displayName) {
                       mediaId = accountData['media_id']?.toString();
                       accountId = accountData['account_id']?.toString();
-                      print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato nuovo - multipli account)');
                       break;
                     }
                   }
@@ -11155,7 +11965,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   if (accountDisplayName == displayName) {
                     mediaId = accountData['media_id']?.toString();
                     accountId = accountData['id']?.toString();
-                    print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato vecchio)');
                     break;
                   }
                 }
@@ -11188,35 +11997,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             String? accessToken;
             if (snap.exists) {
               accessToken = snap.value?.toString();
-              print('[INSTAGRAM] Facebook access token trovato per accountId $accountId dal proprietario del video $userId');
-            } else {
-              print('[INSTAGRAM] Nessun facebook_access_token trovato per accountId $accountId dal proprietario del video $userId');
-            }
+            } else {}
             if (accessToken != null) {
               final apiUrl = 'https://graph.facebook.com/v18.0/$mediaId?fields=id,media_type,media_url,permalink&access_token=$accessToken';
-              print('[INSTAGRAM] Chiamata API: $apiUrl');
               final response = await HttpClient().getUrl(Uri.parse(apiUrl)).then((req) => req.close());
               final respBody = await response.transform(Utf8Decoder()).join();
-              print('[INSTAGRAM] Risposta API: $respBody');
               final data = respBody.isNotEmpty ? Map<String, dynamic>.from(jsonDecode(respBody)) : null;
               if (data != null && data['permalink'] != null) {
                 url = data['permalink'];
-                print('[INSTAGRAM] Permalink ottenuto: $url');
-              } else {
-                print('[INSTAGRAM] Nessun permalink nella risposta');
-              }
-            } else {
-              print('[INSTAGRAM] Nessun access token valido');
-            }
-          } else {
-            print('[INSTAGRAM] Nessun media_id o accountId trovato per display_name=$displayName');
-          }
-        } else {
-          print('[INSTAGRAM] Video ID o User ID mancanti');
-        }
-      } else {
-        print('[INSTAGRAM] Nessun utente autenticato');
-      }
+              } else {}
+            } else {}
+          } else {}
+        } else {}
+      } else {}
     } catch (e) {
       debugPrint('[INSTAGRAM API] Errore durante il fetch del permalink: $e');
     }
@@ -11231,7 +12024,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   Future<void> _openThreadsPostOrProfile(Map<String, dynamic> account) async {
     final displayName = account['account_display_name']?.toString() ?? account['display_name']?.toString() ?? '';
     String? url;
-    print('[THREADS] Richiesta link per displayName=$displayName');
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
@@ -11247,20 +12039,36 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Threads/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Threads');
-            final videoAccountsSnap = await videoAccountsRef.get();
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db.child('users').child('users').child(userId).child('scheduled_posts').child(videoId).child('accounts').child('Threads');
+            var videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Threads');
+              videoAccountsSnap = await videoAccountsRef.get();
+            }
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, può essere oggetto diretto, mappa indicizzata o lista
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                if (accountDisplayName == displayName) {
-                  postId = videoAccounts['post_id']?.toString(); // <-- uso post_id
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  if (accountDisplayName == displayName) {
+                    postId = videoAccounts['post_id']?.toString(); // <-- uso post_id
+                    accountId = videoAccounts['account_id']?.toString();
+                  }
+                } else {
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      if (accountDisplayName == displayName) {
+                        postId = accountData['post_id']?.toString(); // <-- uso post_id
+                        accountId = accountData['account_id']?.toString();
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
                 // Caso: più account per piattaforma (lista di oggetti)
@@ -11270,7 +12078,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     if (accountDisplayName == displayName) {
                       postId = accountData['post_id']?.toString(); // <-- uso post_id
                       accountId = accountData['account_id']?.toString();
-                      print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - multipli account)');
                       break;
                     }
                   }
@@ -11291,7 +12098,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   if (accountDisplayName == displayName) {
                     postId = accountData['post_id']?.toString(); // <-- uso post_id
                     accountId = accountData['id']?.toString();
-                    print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
                     break;
                   }
                 }
@@ -11305,36 +12111,20 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             String? accessToken;
             if (accessTokenSnap.exists) {
               accessToken = accessTokenSnap.value?.toString();
-              print('[THREADS] Access token trovato per accountId $accountId dal proprietario del video $userId');
-            } else {
-              print('[THREADS] Nessun access token trovato per accountId $accountId dal proprietario del video $userId');
-            }
+            } else {}
             if (accessToken != null && accessToken.isNotEmpty) {
               // Chiamata corretta secondo la doc: GET https://graph.threads.net/v1.0/{media_id}?fields=permalink&access_token=...
               final apiUrl = 'https://graph.threads.net/v1.0/$postId?fields=permalink&access_token=$accessToken';
-              print('[THREADS] Chiamata API: $apiUrl');
               final response = await HttpClient().getUrl(Uri.parse(apiUrl)).then((req) => req.close());
               final respBody = await response.transform(Utf8Decoder()).join();
-              print('[THREADS] Risposta API: $respBody');
               final data = respBody.isNotEmpty ? Map<String, dynamic>.from(jsonDecode(respBody)) : null;
               if (data != null && data['permalink'] != null) {
                 url = data['permalink'].toString();
-                print('[THREADS] Permalink ottenuto: $url');
-              } else {
-                print('[THREADS] Nessun permalink nella risposta');
-              }
-            } else {
-              print('[THREADS] Nessun access token valido');
-            }
-          } else {
-            print('[THREADS] Nessun post_id o accountId trovato per display_name=$displayName');
-          }
-        } else {
-          print('[THREADS] Video ID o User ID mancanti');
-        }
-      } else {
-        print('[THREADS] Nessun utente autenticato');
-      }
+              } else {}
+            } else {}
+          } else {}
+        } else {}
+      } else {}
     } catch (e) {
       debugPrint('[THREADS API] Errore durante il fetch del permalink: $e');
     }
@@ -11350,7 +12140,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   Future<void> _openFacebookPostOrProfile(Map<String, dynamic> account) async {
     final displayName = account['account_display_name']?.toString() ?? account['display_name']?.toString() ?? '';
     String? url;
-    print('[FACEBOOK] Richiesta link per displayName=$displayName');
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
@@ -11368,22 +12157,39 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Facebook/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Facebook');
-            final videoAccountsSnap = await videoAccountsRef.get();
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db.child('users').child('users').child(userId).child('scheduled_posts').child(videoId).child('accounts').child('Facebook');
+            var videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Facebook');
+              videoAccountsSnap = await videoAccountsRef.get();
+            }
             
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, può essere oggetto diretto, mappa indicizzata o lista
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                
-                if (accountDisplayName == displayName) {
-                  postId = videoAccounts['post_id']?.toString();
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  
+                  if (accountDisplayName == displayName) {
+                    postId = videoAccounts['post_id']?.toString();
+                    accountId = videoAccounts['account_id']?.toString();
+                  }
+                } else {
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      
+                      if (accountDisplayName == displayName) {
+                        postId = accountData['post_id']?.toString();
+                        accountId = accountData['account_id']?.toString();
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
                 // Caso: più account per piattaforma (lista di oggetti)
@@ -11394,7 +12200,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                     if (accountDisplayName == displayName) {
                       postId = accountData['post_id']?.toString();
                       accountId = accountData['account_id']?.toString();
-                      print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - multipli account)');
                       break;
                     }
                   }
@@ -11417,7 +12222,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
                   if (accountDisplayName == displayName) {
                     postId = accountData['post_id']?.toString();
                     accountId = accountData['id']?.toString();
-                    print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
                     break;
                   }
                 }
@@ -11431,42 +12235,25 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
             String? accessToken;
             if (snap.exists) {
               accessToken = snap.value?.toString();
-              print('[FACEBOOK] Access token trovato per accountId $accountId dal proprietario del video $userId');
-            } else {
-              print('[FACEBOOK] Nessun access token trovato per accountId $accountId dal proprietario del video $userId');
-            }
+            } else {}
             
             if (accessToken != null) {
               final apiUrl = 'https://graph.facebook.com/$postId?fields=permalink_url&access_token=$accessToken';
-              print('[FACEBOOK] Chiamata API: $apiUrl');
               final response = await HttpClient().getUrl(Uri.parse(apiUrl)).then((req) => req.close());
               final respBody = await response.transform(Utf8Decoder()).join();
-              print('[FACEBOOK] Risposta API: $respBody');
               final data = respBody.isNotEmpty ? Map<String, dynamic>.from(jsonDecode(respBody)) : null;
               if (data != null && data['permalink_url'] != null) {
                 final permalink = data['permalink_url'].toString();
-                // Costruisci lURL completo aggiungendo il dominio Facebook se è un permalink relativo
                 if (permalink.startsWith('/')) {
                   url = 'https://www.facebook.com$permalink';
                 } else {
                   url = permalink;
                 }
-                print('[FACEBOOK] Permalink ottenuto: $url');
-              } else {
-                print('[FACEBOOK] Nessun permalink_url nella risposta');
-              }
-            } else {
-              print('[FACEBOOK] Nessun access token valido');
-            }
-          } else {
-            print('[FACEBOOK] Nessun post_id o accountId trovato per display_name=$displayName');
-          }
-        } else {
-          print('[FACEBOOK] Video ID o User ID mancanti');
-        }
-      } else {
-        print('[FACEBOOK] Nessun utente autenticato');
-      }
+              } else {}
+            } else {}
+          } else {}
+        } else {}
+      } else {}
     } catch (e) {
       debugPrint('[FACEBOOK API] Errore durante il fetch del permalink: $e');
     }
@@ -11482,12 +12269,15 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
   Future<void> _openYouTubePostOrProfile(Map<String, dynamic> account) async {
     final postId = account['post_id']?.toString();
     final mediaId = account['media_id']?.toString();
+    final youTubeVideoId = account['youtube_video_id']?.toString();
     
     String url;
     if (postId != null && postId.isNotEmpty) {
       url = 'https://www.youtube.com/watch?v=$postId';
     } else if (mediaId != null && mediaId.isNotEmpty) {
       url = 'https://www.youtube.com/watch?v=$mediaId';
+    } else if (youTubeVideoId != null && youTubeVideoId.isNotEmpty) {
+      url = 'https://www.youtube.com/watch?v=$youTubeVideoId';
     } else {
       url = 'https://www.youtube.com/';
     }
@@ -11528,12 +12318,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       final uri = Uri.parse(url);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        print('Could not launch $url');
-      }
-    } catch (e) {
-      print('Error opening social media: $e');
-    }
+      } else {}
+    } catch (e) {}
   }
 
   // Popup professionale/minimal per Instagram non collegato a Facebook
@@ -11633,9 +12419,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         await launchUrl(instagramUserUri);
         return;
       }
-    } catch (e) {
-      print('Error launching Instagram app with username: $e');
-    }
+    } catch (e) {}
     
     // Fallback to web URL
     final webUri = Uri.parse('https://www.instagram.com/$username/');
@@ -11643,9 +12427,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
       if (await canLaunchUrl(webUri)) {
         await launchUrl(webUri, mode: LaunchMode.externalApplication);
       }
-    } catch (e) {
-      print('Error launching Instagram web: $e');
-    }
+    } catch (e) {}
   }
 
   Future<String?> _getSocialProfileImage(String userId, String platform, String accountId) async {
@@ -11664,7 +12446,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         
         if (snapshot.exists) {
           imageUrl = snapshot.value?.toString();
-          print('[PROFILE IMAGE] YouTube thumbnail_url trovato: $imageUrl');
         }
       } else if (platform.toLowerCase() == 'threads') {
         // Per Threads usa il percorso speciale: users/users/[userId]/social_accounts/threads/[accountId]/profile_image_url
@@ -11680,7 +12461,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         
         if (snapshot.exists) {
           imageUrl = snapshot.value?.toString();
-          print('[PROFILE IMAGE] Threads profile_image_url trovato: $imageUrl');
         }
       } else {
         // Per Instagram, Facebook, TikTok usa profile_image_url
@@ -11694,17 +12474,15 @@ class _ProfileEditPageState extends State<ProfileEditPage> with TickerProviderSt
         
         if (snapshot.exists) {
           imageUrl = snapshot.value?.toString();
-          print('[PROFILE IMAGE] $platform profile_image_url trovato: $imageUrl');
         }
       }
       
       if (imageUrl == null || imageUrl.isEmpty) {
-        print('[PROFILE IMAGE] Nessuna immagine trovata per $platform accountId: $accountId');
+        // Nessuna immagine trovata per questo account
       }
       
       return imageUrl;
     } catch (e) {
-      print('[PROFILE IMAGE] Errore nel recupero immagine per $platform: $e');
       return null;
     }
   }

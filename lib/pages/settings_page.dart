@@ -31,9 +31,8 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderStateMixin {
+class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   // bool _notificationsEnabled = true; // RIMOSSO
-  bool _darkModeEnabled = false;
   String _selectedDateFormat = 'DD/MM/YYYY';
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -230,6 +229,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentUser = FirebaseAuth.instance.currentUser; // <-- subito
     _checkPremiumStatus(); // <--- AGGIUNTO per verificare lo stato premium
     _animationController = AnimationController(
@@ -260,16 +260,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
         
         // Initialize dark mode from provider
         final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-        _darkModeEnabled = themeProvider.isDarkMode;
         
-        // Attiva automaticamente la dark mode se il dispositivo iOS è in dark mode
-        if (Platform.isIOS) {
-          final brightness = MediaQuery.of(context).platformBrightness;
-          if (brightness == Brightness.dark && !themeProvider.isDarkMode) {
-            themeProvider.toggleTheme();
-          }
-        }
-        // RIMOSSO: setState per _currentUser
+        // Sincronizza automaticamente il tema con quello del dispositivo
+        final systemBrightness = MediaQuery.of(context).platformBrightness;
+        _syncThemeWithSystem(brightness: systemBrightness);
       }
     });
   }
@@ -429,6 +423,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _animationController.dispose();
     super.dispose();
   }
@@ -445,22 +440,52 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   }
 
   void _shareApp() {
-    Share.share(
-      'Check out Fluzar, the all-in-one solution for managing your social media content! Download it now: https://viralyst.app',
-      subject: 'Fluzar - Social Media Management Made Easy',
-    );
+    // Invita ad usare il referral code come in community_page.dart
+    () async {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        String message =
+            'Check out Fluzar, the all-in-one solution for managing your social media content! Download it now: https://fluzar.com';
+        String subject = 'Fluzar - Social Media Management Made Easy With AI';
+        
+        if (user != null) {
+          final database = FirebaseDatabase.instance.ref();
+          final userRef = database.child('users').child('users').child(user.uid);
+          final snapshot = await userRef.get();
+          
+          String? referralCode;
+          if (snapshot.exists && snapshot.value is Map) {
+            final userData = snapshot.value as Map<dynamic, dynamic>;
+            if (userData.containsKey('referral_code')) {
+              referralCode = userData['referral_code'] as String?;
+            }
+          }
+          
+          if (referralCode != null && referralCode.isNotEmpty) {
+            message =
+                'Hey! Join me on Fluzar and get 500 bonus credits! Use my referral code: $referralCode. Download it now: https://fluzar.com';
+            subject = 'Join Fluzar - Social Media Management Made Easy With AI';
+          }
+        }
+        
+        await Share.share(
+          message,
+          subject: subject,
+        );
+      } catch (e) {
+        print('Error sharing invite/referral: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error sharing referral code'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    }();
   }
 
-  void _rateApp() async {
-    const url = 'https://play.google.com/store/apps/details?id=com.viralyst.app';
-    if (await canLaunchUrl(Uri.parse(url))) {
-      await launchUrl(Uri.parse(url));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not launch app store')),
-      );
-    }
-  }
 
   /// Gestisce il reindirizzamento alla pagina di billing di Stripe
   Future<void> _handlePaymentRedirect() async {
@@ -1284,7 +1309,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.8,
+              height: MediaQuery.of(context).size.height * 0.75,
               decoration: BoxDecoration(
                 color: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1343,8 +1368,6 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       padding: EdgeInsets.symmetric(horizontal: 20),
                       child: Column(
                         children: [
-                          _buildPrivacySectionForModal(theme, setModalState),
-                          SizedBox(height: 30),
                           _buildStatsVisibilitySectionForModal(theme, setModalState),
                           SizedBox(height: 30),
                         ],
@@ -1565,7 +1588,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
           ),
           SizedBox(height: 8),
           Text(
-            'Choose what to show to other users who are not your friends',
+            'Choose what to show to other users who are not your friends, only your friends can see the complete information.',
             style: TextStyle(
               color: Colors.grey[600],
               fontSize: 14,
@@ -1833,14 +1856,6 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
               ),
             ],
           ),
-          SizedBox(height: 8),
-          Text(
-            'Manage the visibility of your profile and statistics for users who are not your friends, only your friends can see the complete information.',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 14,
-            ),
-          ),
         ],
       ),
     );
@@ -1943,7 +1958,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
           ),
           SizedBox(height: 8),
           Text(
-            'Choose what to show to other users who are not your friends',
+            'Choose what to show to other users who are not your friends, only your friends can see the complete information.',
             style: TextStyle(
               color: Colors.grey[600],
               fontSize: 14,
@@ -2114,6 +2129,20 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
       activeColor: const Color(0xFF667eea),
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     );
+  }
+
+  void _syncThemeWithSystem({Brightness? brightness}) {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    final resolvedBrightness = brightness ?? WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    final shouldUseDark = resolvedBrightness == Brightness.dark;
+    themeProvider.setDarkMode(shouldUseDark);
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    if (!mounted) return;
+    _syncThemeWithSystem();
   }
 
   // Funzione per attivare il full screen
@@ -2296,7 +2325,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                               value: themeProvider.isDarkMode,
                               activeColor: const Color(0xFF667eea),
                               onChanged: (value) {
-                                themeProvider.toggleTheme();
+                                themeProvider.setDarkMode(value);
                               },
                             ),
                           ),
@@ -2443,12 +2472,6 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                             'Share App',
                             Icons.share_outlined,
                             onTap: _shareApp,
-                          ),
-                          _buildAnimatedTile(
-                            context,
-                            'Rate App',
-                            Icons.star_outline,
-                            onTap: _rateApp,
                           ),
                         ],
                       ),

@@ -388,21 +388,61 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
   Widget _buildReferralCodeCard(ThemeData theme) {
     if (_referralCode == null) return const SizedBox.shrink();
     
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+    final isDark = theme.brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            // Effetto vetro semi-trasparente opaco
+            color: isDark 
+                ? Colors.white.withOpacity(0.15) 
+                : Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(20),
+            // Bordo con effetto vetro
+            border: Border.all(
+              color: isDark 
+                  ? Colors.white.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.4),
+              width: 1,
+            ),
+            // Ombre per effetto sospeso
+            boxShadow: [
+              BoxShadow(
+                color: isDark 
+                    ? Colors.black.withOpacity(0.4)
+                    : Colors.black.withOpacity(0.15),
+                blurRadius: isDark ? 25 : 20,
+                spreadRadius: isDark ? 1 : 0,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.white.withOpacity(0.6),
+                blurRadius: 2,
+                spreadRadius: -2,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            // Gradiente sottile per effetto vetro
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark 
+                  ? [
+                      Colors.white.withOpacity(0.2),
+                      Colors.white.withOpacity(0.1),
+                    ]
+                  : [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.2),
+                    ],
+            ),
           ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
+          padding: const EdgeInsets.all(20),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -559,6 +599,8 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -699,21 +741,57 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
       }
     }
     
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+    final isDark = theme.brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark 
+                ? Colors.white.withOpacity(0.15) 
+                : Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark 
+                  ? Colors.white.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.4),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isDark 
+                    ? Colors.black.withOpacity(0.4)
+                    : Colors.black.withOpacity(0.15),
+                blurRadius: isDark ? 25 : 20,
+                spreadRadius: isDark ? 1 : 0,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.white.withOpacity(0.6),
+                blurRadius: 2,
+                spreadRadius: -2,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark 
+                  ? [
+                      Colors.white.withOpacity(0.2),
+                      Colors.white.withOpacity(0.1),
+                    ]
+                  : [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.2),
+                    ],
+            ),
           ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
+          padding: const EdgeInsets.all(20),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -781,6 +859,8 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
           // Add all the step widgets
           ...stepWidgets,
         ],
+          ),
+        ),
       ),
     );
   }
@@ -808,6 +888,158 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
             ? Color(0xFF667eea).withOpacity(0.05)
             : theme.colorScheme.surfaceVariant;
             
+    if (!isActive && !isCompleted) {
+      // Non iniziato: applica effetto glass con bordo visibile
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+            margin: EdgeInsets.symmetric(vertical: 2),
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.white.withOpacity(0.12)
+                  : Colors.white.withOpacity(0.22),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: theme.brightness == Brightness.dark
+                    ? Colors.white.withOpacity(0.28)
+                    : Colors.white.withOpacity(0.55),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.brightness == Brightness.dark
+                      ? Colors.black.withOpacity(0.08)
+                      : Colors.black.withOpacity(0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Step number/check circle
+                Container(
+                  width: 45,
+                  height: 45,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.0),
+                    border: Border.all(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.white.withOpacity(0.45)
+                          : Colors.grey.shade400,
+                      width: 2,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      isRepeating ? '4+' : number.toString(),
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade500,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          // Credits badge
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.0),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: theme.brightness == Brightness.dark
+                                    ? Colors.white.withOpacity(0.35)
+                                    : Colors.grey.shade300,
+                                width: 1,
+                              ),
+                            ),
+                            child: ShaderMask(
+                              shaderCallback: (Rect bounds) {
+                                return LinearGradient(
+                                  colors: [
+                                    Color(0xFF667eea),
+                                    Color(0xFF764ba2),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                ).createShader(bounds);
+                              },
+                              child: Text(
+                                '+$credits',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Step icon
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.0),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: theme.brightness == Brightness.dark
+                                    ? Colors.white.withOpacity(0.4)
+                                    : Colors.grey.shade400,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Icon(
+                              icon,
+                              color: Colors.grey.shade500,
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       margin: EdgeInsets.symmetric(vertical: 2),
@@ -1084,25 +1316,57 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
 
   // Build the how it works section
   Widget _buildHowItWorksSection(ThemeData theme) {
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark 
-            ? Color(0xFF1E1E1E) 
-            : theme.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: theme.brightness == Brightness.dark 
-                ? Colors.black.withOpacity(0.3) 
-                : Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+    final isDark = theme.brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark 
+                ? Colors.white.withOpacity(0.15) 
+                : Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark 
+                  ? Colors.white.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.4),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isDark 
+                    ? Colors.black.withOpacity(0.4)
+                    : Colors.black.withOpacity(0.15),
+                blurRadius: isDark ? 25 : 20,
+                spreadRadius: isDark ? 1 : 0,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.white.withOpacity(0.6),
+                blurRadius: 2,
+                spreadRadius: -2,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark 
+                  ? [
+                      Colors.white.withOpacity(0.2),
+                      Colors.white.withOpacity(0.1),
+                    ]
+                  : [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.2),
+                    ],
+            ),
           ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
+          padding: const EdgeInsets.all(20),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ShaderMask(
@@ -1212,6 +1476,8 @@ class _ReferralCodePageState extends State<ReferralCodePage> {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }

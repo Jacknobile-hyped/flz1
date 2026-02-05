@@ -1845,7 +1845,10 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                               vertical: 10,
                             ),
                           ),
-                          maxLength: 200,
+                          maxLength: 120,
+                          inputFormatters: [
+                            LengthLimitingTextInputFormatter(120),
+                          ],
                           buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                         ),
                   ),
@@ -2609,12 +2612,6 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                               ? Colors.grey[800] 
                               : Colors.white,
                           borderRadius: BorderRadius.circular(25),
-                          border: Border.all(
-                            color: replyFocusNode.hasFocus 
-                                ? Color(0xFF6C63FF) 
-                                : Colors.grey[300]!,
-                            width: 1,
-                          ),
                         ),
                         child: TextField(
                           controller: replyController,
@@ -2634,7 +2631,10 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                               vertical: 10,
                             ),
                           ),
-                          maxLength: 200,
+                          maxLength: 120,
+                          inputFormatters: [
+                            LengthLimitingTextInputFormatter(120),
+                          ],
                           buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                         ),
                       ),
@@ -3185,10 +3185,6 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                             ? Colors.grey[800] 
                             : Colors.white,
                         borderRadius: BorderRadius.circular(25),
-                        border: Border.all(
-                          color: Colors.grey[300]!,
-                          width: 1,
-                        ),
                       ),
                                              child: TextField(
                          controller: replyController,
@@ -3208,7 +3204,10 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
                              vertical: 10,
                            ),
                          ),
-                         maxLength: 200,
+                         maxLength: 120,
+                         inputFormatters: [
+                           LengthLimitingTextInputFormatter(120),
+                         ],
                          buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                          onSubmitted: (text) async {
                            if (text.trim().isNotEmpty) {
@@ -5605,10 +5604,10 @@ class _CommunityPageState extends State<CommunityPage> with TickerProviderStateM
         }
         return;
       }
-              final String message = 'Hey! Join me on Fluzar and get 500 bonus credits! Use my referral code: $referralCode';
+              final String message = 'Hey! Join me on Fluzar and get 500 bonus credits! Use my referral code: $referralCode. Download it now: https://fluzar.com';
       await Share.share(
         message,
-                  subject: 'Join Fluzar with my referral code',
+                  subject: 'Join Fluzar - Social Media Management Made Easy With AI',
       );
     } catch (e) {
       print('Error sharing invite: $e');

@@ -659,7 +659,7 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Are you sure you want to completely remove the Facebook page "${account['displayName'] ?? account['name']}" from your Viralyst account?',
+              'Are you sure you want to completely remove the Facebook page "${account['displayName'] ?? account['name']}" from your Fluzar account?',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey[800],
@@ -686,7 +686,7 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
                   SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      'This will only remove the page from Viralyst. Your Facebook page will not be affected.',
+                      'This will only remove the page from Fluzar. Your Facebook page will not be affected.',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.blue.shade700,
@@ -771,18 +771,52 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                // Effetto vetro semi-trasparente opaco
+                color: theme.brightness == Brightness.dark 
+                    ? Colors.white.withOpacity(0.15) 
+                    : Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(20),
+                // Bordo con effetto vetro più sottile
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
+                // Ombra per effetto profondità e vetro
                 boxShadow: [
                   BoxShadow(
                     color: theme.brightness == Brightness.dark 
-                        ? Colors.black.withOpacity(0.3)
-                        : Colors.black.withOpacity(0.05),
-                    spreadRadius: 1,
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                        ? Colors.black.withOpacity(0.4)
+                        : Colors.black.withOpacity(0.15),
+                    blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+                    spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+                    offset: const Offset(0, 10),
+                  ),
+                  // Ombra interna per effetto vetro
+                  BoxShadow(
+                    color: theme.brightness == Brightness.dark 
+                        ? Colors.white.withOpacity(0.1)
+                        : Colors.white.withOpacity(0.6),
+                    blurRadius: 2,
+                    spreadRadius: -2,
+                    offset: const Offset(0, 2),
                   ),
                 ],
+                // Gradiente più sottile per effetto vetro
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: theme.brightness == Brightness.dark 
+                      ? [
+                          Colors.white.withOpacity(0.2),
+                          Colors.white.withOpacity(0.1),
+                        ]
+                      : [
+                          Colors.white.withOpacity(0.3),
+                          Colors.white.withOpacity(0.2),
+                        ],
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -851,12 +885,12 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
                           ),
                           _buildInfoItem(
                             'Interactive Details',
-                            'Click on any account to view the videos published with Viralyst.',
+                            'Click on any account to view the videos published with Fluzar.',
                             Icons.touch_app,
                           ),
                           _buildInfoItem(
                             'Account Switching',
-                            'To connect a different Facebook account, you need to logout from the Facebook app and then reconnect here in Viralyst.',
+                            'To connect a different Facebook account, you need to logout from the Facebook app and then reconnect here in Fluzar.',
                             Icons.swap_horiz,
                           ),
                           _buildInfoItem(
@@ -877,17 +911,52 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
               child: Container(
                 height: 36, // Reduced height
                 decoration: BoxDecoration(
-                  color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+                  // Effetto vetro semi-trasparente opaco
+                  color: theme.brightness == Brightness.dark 
+                      ? Colors.white.withOpacity(0.15) 
+                      : Colors.white.withOpacity(0.25),
                   borderRadius: BorderRadius.circular(30),
+                  // Bordo con effetto vetro più sottile
+                  border: Border.all(
+                    color: theme.brightness == Brightness.dark 
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
+                  // Ombra per effetto profondità e vetro
                   boxShadow: [
                     BoxShadow(
                       color: theme.brightness == Brightness.dark 
-                          ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+                      spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+                      offset: const Offset(0, 10),
+                    ),
+                    // Ombra interna per effetto vetro
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark 
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
                       offset: const Offset(0, 2),
                     ),
                   ],
+                  // Gradiente più sottile per effetto vetro
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: theme.brightness == Brightness.dark 
+                        ? [
+                            Colors.white.withOpacity(0.2),
+                            Colors.white.withOpacity(0.1),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.3),
+                            Colors.white.withOpacity(0.2),
+                          ],
+                  ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(3),
@@ -1088,23 +1157,57 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
       ),
-      color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+      color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          // Effetto vetro semi-trasparente opaco
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.15) 
+              : Colors.white.withOpacity(0.25),
+          // Bordo con effetto vetro più sottile
+          border: Border.all(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
+          // Ombra per effetto profondità e vetro
           boxShadow: [
             BoxShadow(
               color: theme.brightness == Brightness.dark 
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
-              spreadRadius: 1,
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+              spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+              offset: const Offset(0, 10),
+            ),
+            // Ombra interna per effetto vetro
+            BoxShadow(
+              color: theme.brightness == Brightness.dark 
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.white.withOpacity(0.6),
+              blurRadius: 2,
+              spreadRadius: -2,
+              offset: const Offset(0, 2),
             ),
           ],
+          // Gradiente più sottile per effetto vetro
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark 
+                ? [
+                    Colors.white.withOpacity(0.2),
+                    Colors.white.withOpacity(0.1),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.3),
+                    Colors.white.withOpacity(0.2),
+                  ],
+          ),
         ),
         child: InkWell(
           onTap: () {
@@ -1127,7 +1230,7 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
               );
             }
           },
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1376,21 +1479,55 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+        // Effetto vetro semi-trasparente opaco
+        color: theme.brightness == Brightness.dark 
+            ? Colors.white.withOpacity(0.15) 
+            : Colors.white.withOpacity(0.25),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(25),
           bottomRight: Radius.circular(25),
         ),
+        // Bordo con effetto vetro più sottile
+        border: Border.all(
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
+        // Ombra per effetto profondità e vetro
         boxShadow: [
           BoxShadow(
             color: theme.brightness == Brightness.dark 
-                ? Colors.black.withOpacity(0.3)
-                : Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+            spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+            offset: const Offset(0, 10),
+          ),
+          // Ombra interna per effetto vetro
+          BoxShadow(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, 2),
           ),
         ],
+        // Gradiente più sottile per effetto vetro
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.brightness == Brightness.dark 
+              ? [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ]
+              : [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.2),
+                ],
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1731,7 +1868,7 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Step 2: Reconnect in Viralyst',
+                              'Step 2: Reconnect in Fluzar',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
@@ -1740,7 +1877,7 @@ class _FacebookPageState extends State<FacebookPage> with TickerProviderStateMix
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              'After logging out from Facebook, come back to Viralyst and tap "Connect Facebook Page" to reconnect with your new account.',
+                              'After logging out from Facebook, come back to Fluzar and tap "Connect Facebook Page" to reconnect with your new account.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 12,

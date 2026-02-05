@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'dart:io';
 import 'dart:async';
 import 'package:intl/intl.dart';
@@ -244,6 +245,9 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
               'video_duration_minutes': post['video_duration_minutes'] as int?,
               'video_duration_remaining_seconds': post['video_duration_remaining_seconds'] as int?,
               'video_duration_seconds': post['video_duration_seconds'] as int?,
+              // Nuovo: includi anche media_urls, preservando la struttura originale (Map con indici numerici)
+              'media_urls': post['media_urls'] is Map ? post['media_urls'] as Map<dynamic, dynamic>? : post['media_urls'],
+              'cloudflare_urls': post['cloudflare_urls'] is Map ? post['cloudflare_urls'] as Map<dynamic, dynamic>? : post['cloudflare_urls'], // Aggiunto per il controllo del carosello
             };
           })
           .where((post) => post != null && post['scheduledTime'] != null)
@@ -332,6 +336,9 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
               'video_duration_minutes': post['video_duration_minutes'] as int?,
               'video_duration_remaining_seconds': post['video_duration_remaining_seconds'] as int?,
               'video_duration_seconds': post['video_duration_seconds'] as int?,
+              // Nuovo: includi anche media_urls, preservando la struttura originale (Map con indici numerici)
+              'media_urls': post['media_urls'] is Map ? post['media_urls'] as Map<dynamic, dynamic>? : post['media_urls'],
+              'cloudflare_urls': post['cloudflare_urls'] is Map ? post['cloudflare_urls'] as Map<dynamic, dynamic>? : post['cloudflare_urls'], // Aggiunto per il controllo del carosello
             };
           })
           .where((post) => post != null && post['scheduledTime'] != null)
@@ -980,7 +987,7 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
                         child: Container(
                           padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: theme.brightness == Brightness.dark ? Colors.transparent : Colors.white,
                             borderRadius: BorderRadius.circular(8),
                             boxShadow: [
                               BoxShadow(
@@ -1344,6 +1351,50 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
     // Determina se siamo nella sezione "upcoming" o "recent"
     final isUpcomingSection = _currentSortMode == SortMode.upcoming;
     
+    // Controlla se è un carosello (ha cloudflare_urls o media_urls con più di una voce)
+    final cloudflareUrls = post['cloudflare_urls'];
+    final mediaUrls = post['media_urls'];
+    
+    // Helper per verificare se una struttura contiene più elementi
+    bool _hasMultipleItems(dynamic data) {
+      if (data == null) return false;
+      if (data is List && data.length > 1) return true;
+      if (data is Map) {
+        // Conta solo le chiavi che sono numeriche o stringhe numeriche (indici)
+        int count = 0;
+        for (var key in data.keys) {
+          // Accetta chiavi numeriche (int) o stringhe numeriche ("0", "1", "2", ecc.)
+          if (key is int || (key is String && int.tryParse(key) != null)) {
+            count++;
+          }
+        }
+        return count > 1;
+      }
+      return false;
+    }
+    
+    // Verifica se è un carosello controllando entrambi i campi
+    bool isCarousel = _hasMultipleItems(cloudflareUrls) || _hasMultipleItems(mediaUrls);
+    
+    // Se è un carosello, mostra "CAROUSEL" (ha priorità su tutto)
+    if (isCarousel) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'CAROUSEL',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
+    
     // Se è un'immagine, mostra "IMG"
     if (isUpcomingSection ? post['media_type'] == 'image' : post['is_image'] == true) {
       return Container(
@@ -1408,7 +1459,7 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
       icon = Icons.check_circle;
       label = 'PUBLISHED';
     } else {
-      backgroundColor = const Color(0xFF34C759);
+      backgroundColor = const Color(0xFFFF9500); // Arancione per scheduled
       icon = Icons.schedule;
       label = 'SCHEDULED';
     }
@@ -1868,26 +1919,27 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: (postCount > 0 && !isPastMonth)
-                                ? Color(0xFF667eea).withOpacity(0.1)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '$postCount posts',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isPastMonth
-                                  ? (isDark ? Colors.grey[600] : Colors.grey[400])
-                                  : postCount > 0
-                                      ? Color(0xFF667eea)
-                                      : theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
-                              fontWeight: (postCount > 0 && !isPastMonth) ? FontWeight.bold : FontWeight.normal,
+                        if (!isPastMonth || postCount > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: (postCount > 0 && !isPastMonth)
+                                  ? Color(0xFF667eea).withOpacity(0.1)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$postCount posts',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: isPastMonth
+                                    ? (isDark ? Colors.grey[600] : Colors.grey[400])
+                                    : postCount > 0
+                                        ? Color(0xFF667eea)
+                                        : theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                fontWeight: (postCount > 0 && !isPastMonth) ? FontWeight.bold : FontWeight.normal,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -2737,22 +2789,58 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
       padding: const EdgeInsets.only(top: 20), // Ridotto padding superiore
       child: Column(
         children: [
-          // Filter toggle for upcoming/recent posts
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceVariant.withOpacity(0.6),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
+          // Filter toggle for upcoming/recent posts - glass effect
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white.withOpacity(0.15)
+                      : Colors.white.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: Theme.of(context).brightness == Brightness.dark ? 25 : 20,
+                      spreadRadius: Theme.of(context).brightness == Brightness.dark ? 1 : 0,
+                      offset: const Offset(0, 10),
+                    ),
+                    BoxShadow(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: Theme.of(context).brightness == Brightness.dark
+                        ? [
+                            Colors.white.withOpacity(0.2),
+                            Colors.white.withOpacity(0.1),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.3),
+                            Colors.white.withOpacity(0.2),
+                          ],
+                  ),
+                ),
+                child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
@@ -2792,8 +2880,10 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
                 ],
               ),
             ],
+                ),
+              ),
+            ),
           ),
-        ),
         
         // List of filtered posts
         Expanded(
@@ -2921,21 +3011,31 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           decoration: BoxDecoration(
-            gradient: isSelected 
+            gradient: isSelected
                 ? LinearGradient(
                     colors: [
-                      Color(0xFF667eea), // Colore iniziale: blu violaceo
-                      Color(0xFF764ba2), // Colore finale: viola
+                      Color(0xFF667eea),
+                      Color(0xFF764ba2),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                    transform: GradientRotation(135 * 3.14159 / 180),
                   )
                 : null,
-            color: isSelected 
-                ? null 
-                : theme.colorScheme.surface,
+            color: isSelected
+                ? null
+                : (theme.brightness == Brightness.dark
+                    ? Colors.white.withOpacity(0.12)
+                    : Colors.white.withOpacity(0.22)),
             borderRadius: BorderRadius.circular(12),
+            border: isSelected
+                ? null
+                : Border.all(
+                    color: theme.brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
@@ -2944,29 +3044,74 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
                       offset: const Offset(0, 2),
                     ),
                   ]
-                : null,
+                : [
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.black.withOpacity(0.08)
+                          : Colors.black.withOpacity(0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                color: isSelected 
-                    ? Colors.white 
-                    : Color(0xFF667eea),
-                size: 16,
-              ),
+              isSelected
+                  ? Icon(
+                      icon,
+                      color: Colors.white,
+                      size: 16,
+                    )
+                  : ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea),
+                            Color(0xFF764ba2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Icon(
+                        icon,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ),
               const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected 
-                      ? Colors.white 
-                      : Color(0xFF667eea),
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
+              isSelected
+                  ? Text(
+                      label,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    )
+                  : ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea),
+                            Color(0xFF764ba2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
             ],
           ),
         ),
@@ -3010,202 +3155,245 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
               // Updated navigation - now using TabBar similar to history_page
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-              child: Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[800] : Colors.white,
+                child: ClipRRect(
                   borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: TabBar(
-                    controller: _tabController,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.grey[500],
-                    indicator: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30),
-                      gradient: LinearGradient(
-                        colors: [
-                          Color(0xFF667eea), // Colore iniziale: blu violaceo
-                          Color(0xFF764ba2), // Colore finale: viola
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                      ),
-                                              boxShadow: [
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      height: 36,
+                      decoration: BoxDecoration(
+                        // Effetto vetro sospeso
+                        color: isDark
+                            ? Colors.white.withOpacity(0.15)
+                            : Colors.white.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(30),
+                        // Bordo con effetto vetro
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withOpacity(0.2)
+                              : Colors.white.withOpacity(0.4),
+                          width: 1,
+                        ),
+                        // Ombre per effetto sospeso
+                        boxShadow: [
                           BoxShadow(
-                            color: Color(0xFF667eea).withOpacity(0.3),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
+                            color: isDark
+                                ? Colors.black.withOpacity(0.4)
+                                : Colors.black.withOpacity(0.15),
+                            blurRadius: isDark ? 25 : 20,
+                            spreadRadius: isDark ? 1 : 0,
+                            offset: const Offset(0, 10),
+                          ),
+                          BoxShadow(
+                            color: isDark
+                                ? Colors.white.withOpacity(0.1)
+                                : Colors.white.withOpacity(0.6),
+                            blurRadius: 2,
+                            spreadRadius: -2,
+                            offset: const Offset(0, 2),
                           ),
                         ],
-                    ),
-                    dividerColor: Colors.transparent,
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    labelStyle: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: Colors.transparent, // Nasconde il testo predefinito
-                    ),
-                    unselectedLabelStyle: const TextStyle(
-                      fontWeight: FontWeight.normal,
-                      fontSize: 13,
-                      color: Colors.transparent, // Nasconde il testo predefinito
-                    ),
-                    labelPadding: EdgeInsets.zero,
-                    padding: EdgeInsets.zero,
-                    tabs: [
-                      Tab(
-                        icon: AnimatedBuilder(
-                          animation: _tabController,
-                          builder: (context, child) {
-                            final isSelected = _tabController.index == 0;
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                isSelected
-                                    ? Icon(Icons.view_week_rounded, size: 18, color: Colors.white)
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Icon(Icons.view_week_rounded, size: 18, color: Colors.white),
-                                      ),
-                                const SizedBox(width: 6),
-                                isSelected
-                                    ? Text('Week', style: TextStyle(color: Colors.white))
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Text('Week', style: TextStyle(color: Colors.white)),
-                                      ),
-                              ],
-                            );
-                          },
+                        // Gradiente sottile per effetto vetro
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: isDark
+                              ? [
+                                  Colors.white.withOpacity(0.2),
+                                  Colors.white.withOpacity(0.1),
+                                ]
+                              : [
+                                  Colors.white.withOpacity(0.3),
+                                  Colors.white.withOpacity(0.2),
+                                ],
                         ),
                       ),
-                      Tab(
-                        icon: AnimatedBuilder(
-                          animation: _tabController,
-                          builder: (context, child) {
-                            final isSelected = _tabController.index == 1;
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                isSelected
-                                    ? Icon(Icons.calendar_month_rounded, size: 18, color: Colors.white)
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Icon(Icons.calendar_month_rounded, size: 18, color: Colors.white),
-                                      ),
-                                const SizedBox(width: 6),
-                                isSelected
-                                    ? Text('Month', style: TextStyle(color: Colors.white))
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Text('Month', style: TextStyle(color: Colors.white)),
-                                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: TabBar(
+                          controller: _tabController,
+                          labelColor: Colors.white,
+                          unselectedLabelColor: theme.unselectedWidgetColor,
+                          indicator: BoxDecoration(
+                            borderRadius: BorderRadius.circular(30),
+                            gradient: LinearGradient(
+                              colors: [
+                                Color(0xFF667eea),
+                                Color(0xFF764ba2),
                               ],
-                            );
-                          },
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              transform:
+                                  GradientRotation(135 * 3.14159 / 180),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0xFF667eea).withOpacity(0.3),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          dividerColor: Colors.transparent,
+                          indicatorSize: TabBarIndicatorSize.tab,
+                          labelStyle: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.transparent, // Nasconde il testo predefinito
+                          ),
+                          unselectedLabelStyle: const TextStyle(
+                            fontWeight: FontWeight.normal,
+                            fontSize: 13,
+                            color: Colors.transparent, // Nasconde il testo predefinito
+                          ),
+                          labelPadding: EdgeInsets.zero,
+                          padding: EdgeInsets.zero,
+                          tabs: [
+                            Tab(
+                              icon: AnimatedBuilder(
+                                animation: _tabController,
+                                builder: (context, child) {
+                                  final isSelected = _tabController.index == 0;
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      isSelected
+                                          ? Icon(Icons.view_week_rounded, size: 18, color: Colors.white)
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Icon(Icons.view_week_rounded, size: 18, color: Colors.white),
+                                            ),
+                                      const SizedBox(width: 6),
+                                      isSelected
+                                          ? Text('Week', style: TextStyle(color: Colors.white))
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Text('Week', style: TextStyle(color: Colors.white)),
+                                            ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                            Tab(
+                              icon: AnimatedBuilder(
+                                animation: _tabController,
+                                builder: (context, child) {
+                                  final isSelected = _tabController.index == 1;
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      isSelected
+                                          ? Icon(Icons.calendar_month_rounded, size: 18, color: Colors.white)
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Icon(Icons.calendar_month_rounded, size: 18, color: Colors.white),
+                                            ),
+                                      const SizedBox(width: 6),
+                                      isSelected
+                                          ? Text('Month', style: TextStyle(color: Colors.white))
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Text('Month', style: TextStyle(color: Colors.white)),
+                                            ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                            Tab(
+                              icon: AnimatedBuilder(
+                                animation: _tabController,
+                                builder: (context, child) {
+                                  final isSelected = _tabController.index == 2;
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      isSelected
+                                          ? Icon(Icons.timer_rounded, size: 18, color: Colors.white)
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Icon(Icons.timer_rounded, size: 18, color: Colors.white),
+                                            ),
+                                      const SizedBox(width: 6),
+                                      isSelected
+                                          ? Text('Quick', style: TextStyle(color: Colors.white))
+                                          : ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF667eea), // blu violaceo
+                                                    Color(0xFF764ba2), // viola
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  transform: GradientRotation(135 * 3.14159 / 180),
+                                                ).createShader(bounds);
+                                              },
+                                              child: Text('Quick', style: TextStyle(color: Colors.white)),
+                                            ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      Tab(
-                        icon: AnimatedBuilder(
-                          animation: _tabController,
-                          builder: (context, child) {
-                            final isSelected = _tabController.index == 2;
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                isSelected
-                                    ? Icon(Icons.timer_rounded, size: 18, color: Colors.white)
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Icon(Icons.timer_rounded, size: 18, color: Colors.white),
-                                      ),
-                                const SizedBox(width: 6),
-                                isSelected
-                                    ? Text('Quick', style: TextStyle(color: Colors.white))
-                                    : ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          return LinearGradient(
-                                            colors: [
-                                              Color(0xFF667eea), // blu violaceo
-                                              Color(0xFF764ba2), // viola
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            transform: GradientRotation(135 * 3.14159 / 180),
-                                          ).createShader(bounds);
-                                        },
-                                        child: Text('Quick', style: TextStyle(color: Colors.white)),
-                                      ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
             
                           const SizedBox(height: 2),
             
@@ -4080,6 +4268,8 @@ class ScheduledPostsPageState extends State<ScheduledPostsPage> with SingleTicke
                 'text': videoData['description'] ?? '',
                 'platform': videoData['platforms']?.isNotEmpty == true ? videoData['platforms'][0] : '',
                 'media_type': videoData['is_image'] == true ? 'image' : 'video',
+                'cloudflare_urls': videoData['cloudflare_urls'], // Aggiunto per il controllo del carosello
+                'media_urls': videoData['media_urls'], // Aggiunto per il controllo del carosello
               };
             } catch (e) {
               print('Error processing video: $e');

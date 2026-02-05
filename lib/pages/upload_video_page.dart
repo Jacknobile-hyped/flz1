@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:ui'; // <--- AGGIUNTO per ImageFilter e ShaderMask
@@ -35,6 +36,7 @@ import './settings_page.dart';
 import './profile_edit_page.dart';
 import 'social/social_account_details_page.dart';
 import 'package:flutter_app_badger/flutter_app_badger.dart';
+import './credits_page.dart';
 
 // Enum for upload state
 enum UploadState { notStarted, uploading, completed, error }
@@ -98,11 +100,17 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   DateTime? _lastAccountsLoadTime;
 
   final ImagePicker _picker = ImagePicker();
-  File? _videoFile;
-  bool _isImageFile = false;
+  File? _videoFile; // File attualmente attivo (per compatibilità con il resto del codice)
+  List<File> _videoFiles = []; // Lista di tutti i media selezionati
+  bool _isImageFile = false; // True se il media attivo è un'immagine
+  List<bool> _isImageFiles = []; // Lista che indica per ogni file se è un'immagine
   bool _isVideoFromUrl = false; // Track if video was loaded from URL
   String? _thumbnailPath;
   File? _youtubeThumbnailFile; // Per la miniatura personalizzata di YouTube
+  
+  // Carousel controller per media multipli
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0; // Indice del media attivo nel carosello
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _promptController = TextEditingController();
@@ -123,7 +131,6 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   // Controller for video playback
   VideoPlayerController? _videoPlayerController;
   bool _isVideoInitialized = false;
-  bool _isVideoFullscreen = false;
   bool _isVideoLocked = false;
   bool _isVideoPlaying = false;
   bool _showVideoControls = true;
@@ -210,6 +217,9 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
 
   // Track user credits
   int _userCredits = 750; // Default value, will be loaded from database
+  
+  // Variabile per mostrare lo snackbar dei crediti insufficienti
+  bool _showInsufficientCreditsSnackbar = false;
 
   bool _isCreatingDescription = false;
   String? _generatedDescription;
@@ -245,6 +255,9 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   bool _tiktokCommercialContent = false;
   bool _tiktokOwnBrand = false;
   bool _tiktokBrandedContent = false;
+
+  // YouTube specific options
+  Map<String, Map<String, dynamic>> _youtubeOptions = {};
 
   @override
   void initState() {
@@ -334,6 +347,12 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         }
       });
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _applySystemUiOverlayStyle();
+      }
+    });
   }
 
   @override
@@ -342,11 +361,13 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     routeObserver.unsubscribe(this);
     
     WidgetsBinding.instance.removeObserver(this);
+    
+    // Cancella i timer per evitare memory leak
+    _scrollDebounceTimer?.cancel();
     _scrollController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
     _promptController.dispose();
-    _scrollDebounceTimer?.cancel();
     
     // Clean up notification stream
     _notificationsStream = null;
@@ -365,6 +386,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       _videoPlayerController!.dispose();
       _videoPlayerController = null;
     }
+    
+    // Dispose carousel controller
+    _carouselController?.dispose();
+    _carouselController = null;
     
     // Dispose timers
     _positionUpdateTimer?.cancel();
@@ -396,6 +421,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     if (route != null && route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
+
+    _applySystemUiOverlayStyle();
   }
   
   // Chiamato quando questa route non è più visibile (un'altra pagina è stata spinta sopra)
@@ -428,6 +455,21 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         // Force UI update
       });
     }
+
+    _applySystemUiOverlayStyle();
+  }
+
+  void _applySystemUiOverlayStyle() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: Platform.isIOS ? Colors.transparent : (isDark ? const Color(0xFF121212) : Colors.white),
+      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
   }
 
   // Metodo per navigare a una pagina social e ricaricare gli account quando si torna
@@ -516,28 +558,6 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       _videoDuration = _videoPlayerController!.value.duration;
       
       // Cancel auto-hide timer when video is paused
-      _controlsHideTimer?.cancel();
-    }
-  }
-  
-  void _toggleFullScreen() {
-    setState(() {
-      _isVideoFullscreen = !_isVideoFullscreen;
-      _showVideoControls = true;
-    });
-    
-    // Reset timer for auto-hide controls when entering fullscreen
-    if (_isVideoFullscreen) {
-      _controlsHideTimer?.cancel();
-      _controlsHideTimer = Timer(Duration(seconds: 3), () {
-        if (mounted && _isVideoFullscreen) {
-          setState(() {
-            _showVideoControls = false;
-          });
-        }
-      });
-    } else {
-      // Cancel timer when exiting fullscreen
       _controlsHideTimer?.cancel();
     }
   }
@@ -660,7 +680,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   bool _canProceedFromCurrentStep() {
     switch (_currentStep) {
       case UploadStep.selectMedia:
-        return _videoFile != null;
+        return _videoFile != null || _videoFiles.isNotEmpty;
       case UploadStep.addDetails:
         return true; // Always allow proceeding from details step
       case UploadStep.selectAccounts:
@@ -701,7 +721,49 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       print('Error loading user credits: $e');
     }
   }
-  void _loadDraftDataFromService(Map<String, dynamic>? draftData, String? draftId) {
+
+  // Sottrae 7 crediti per utenti non premium quando generano descrizioni IA specifiche per piattaforma
+  Future<void> _subtractCreditsForAIDescription() async {
+    if (_isPremium) return; // Non sottrarre crediti per utenti premium
+    
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final databaseRef = FirebaseDatabase.instance.ref();
+        final creditsRef = databaseRef.child('users').child('users').child(user.uid).child('credits');
+        
+        // Ottieni i crediti attuali
+        final snapshot = await creditsRef.get();
+        int currentCredits = 0;
+        
+        if (snapshot.exists && snapshot.value != null) {
+          if (snapshot.value is int) {
+            currentCredits = snapshot.value as int;
+          } else if (snapshot.value is String) {
+            currentCredits = int.tryParse(snapshot.value as String) ?? 0;
+          }
+        }
+        
+        // Sottrai 7 crediti
+        int newCredits = currentCredits - 7;
+        if (newCredits < 0) newCredits = 0; // Non permettere crediti negativi
+        
+        // Salva i nuovi crediti
+        await creditsRef.set(newCredits);
+        
+        // Aggiorna i crediti locali
+        setState(() {
+          _userCredits = newCredits;
+        });
+        
+        print('DEBUG: Credits updated: $currentCredits -> $newCredits (subtracted 7 for AI description)');
+      }
+    } catch (e) {
+      print('Error subtracting credits: $e');
+    }
+  }
+
+  void _loadDraftDataFromService(Map<String, dynamic>? draftData, String? draftId) async {
     if (draftData == null) return;
     
     // Imposta il draftId se fornito
@@ -712,75 +774,153 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     // Carica i dati del draft usando la stessa logica di _loadDraftData
     final draft = draftData;
     
-    // Set video file - handle both video_path and media_url
-    String? videoPath = draft['video_path'] ?? draft['media_url'];
-    if (videoPath != null) {
-      // Check if it's a URL (starts with http:// or https://)
-      if (videoPath.startsWith('http://') || videoPath.startsWith('https://')) {
-        _loadVideoFromUrl(videoPath);
-      } else {
-        // Handle local file path
-        final videoFile = File(videoPath);
+    // Check if there are multiple media (carousel) - prioritize video_paths
+    final videoPaths = draft['video_paths'] as List<dynamic>?;
+    
+    if (videoPaths != null && videoPaths.isNotEmpty) {
+      // Carousel: load all media from video_paths
+      List<File> loadedFiles = [];
+      List<bool> loadedIsImageFiles = [];
+      
+      for (var path in videoPaths) {
+        final String filePath = path.toString();
+        File? fileToAdd;
         
-        // Check if file exists
-        if (videoFile.existsSync()) {
-          setState(() {
-            _videoFile = videoFile;
-            _showCheckmark = true;
-            _isImageFile = videoPath.toLowerCase().endsWith('.jpg') || 
-                         videoPath.toLowerCase().endsWith('.jpeg') || 
-                         videoPath.toLowerCase().endsWith('.png');
-            _isVideoFromUrl = false; // Reset flag for local files
-          });
-          
-          // Initialize video player if it's a video
-          if (!_isImageFile) {
-            _initializeVideoPlayer(videoFile);
-          }
-          
-          // Passa al secondo step dopo un breve ritardo
-          Future.delayed(Duration(milliseconds: 500), () {
-            if (mounted) {
-              _goToNextStep();
-            }
-          });
+        // Check if file exists at the specified path
+        final file = File(filePath);
+        if (file.existsSync()) {
+          fileToAdd = file;
         } else {
-          // Try to find the file in the app's local storage
-          final fileName = videoPath.split('/').last;
-          getApplicationDocumentsDirectory().then((directory) {
-            final localPath = '${directory.path}/$fileName';
-            final localFile = File(localPath);
-            if (localFile.existsSync()) {
-                          setState(() {
-              _videoFile = localFile;
+          // Try to find the file in app_flutter directory
+          final fileName = filePath.split('/').last;
+          final appDocDir = await getApplicationDocumentsDirectory();
+          final localPath = '${appDocDir.path}/$fileName';
+          final localFile = File(localPath);
+          if (localFile.existsSync()) {
+            fileToAdd = localFile;
+          }
+        }
+        
+        if (fileToAdd != null) {
+          loadedFiles.add(fileToAdd);
+          final lowerPath = fileToAdd.path.toLowerCase();
+          final isImage = lowerPath.endsWith('.jpg') || 
+                         lowerPath.endsWith('.jpeg') || 
+                         lowerPath.endsWith('.png') ||
+                         lowerPath.endsWith('.gif') ||
+                         lowerPath.endsWith('.webp') ||
+                         lowerPath.endsWith('.bmp') ||
+                         lowerPath.endsWith('.heic') ||
+                         lowerPath.endsWith('.heif');
+          loadedIsImageFiles.add(isImage);
+        }
+      }
+      
+      if (loadedFiles.isNotEmpty) {
+        setState(() {
+          _videoFiles = loadedFiles;
+          _isImageFiles = loadedIsImageFiles;
+          _videoFile = loadedFiles[0];
+          _isImageFile = loadedIsImageFiles[0];
+          _showCheckmark = true;
+          _isVideoFromUrl = false;
+          _currentCarouselIndex = 0;
+          
+          // Initialize carousel controller if multiple files
+          if (loadedFiles.length > 1) {
+            _carouselController = PageController(initialPage: 0);
+          }
+        });
+        
+        // Initialize video player if first media is a video
+        if (!loadedIsImageFiles[0]) {
+          _initializeVideoPlayer(loadedFiles[0]);
+        }
+        
+        // Passa al secondo step dopo un breve ritardo
+        Future.delayed(Duration(milliseconds: 500), () {
+          if (mounted) {
+            _goToNextStep();
+          }
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not find any media files from draft'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } else {
+      // Single media: use existing logic with video_path or media_url
+      String? videoPath = draft['video_path'] ?? draft['media_url'];
+      if (videoPath != null) {
+        // Check if it's a URL (starts with http:// or https://)
+        if (videoPath.startsWith('http://') || videoPath.startsWith('https://')) {
+          _loadVideoFromUrl(videoPath);
+        } else {
+          // Handle local file path
+          final videoFile = File(videoPath);
+          
+          // Check if file exists
+          if (videoFile.existsSync()) {
+            setState(() {
+              _videoFile = videoFile;
               _showCheckmark = true;
-              _isImageFile = localPath.toLowerCase().endsWith('.jpg') || 
-                           localPath.toLowerCase().endsWith('.jpeg') || 
-                           localPath.toLowerCase().endsWith('.png');
-              _isVideoFromUrl = false; // Reset flag for local files
+              _isImageFile = videoPath.toLowerCase().endsWith('.jpg') || 
+                           videoPath.toLowerCase().endsWith('.jpeg') || 
+                           videoPath.toLowerCase().endsWith('.png');
               _isVideoFromUrl = false; // Reset flag for local files
             });
-              
-              // Initialize video player if it's a video
-              if (!_isImageFile) {
-                _initializeVideoPlayer(localFile);
-              }
-              
-              // Passa al secondo step dopo un breve ritardo
-              Future.delayed(Duration(milliseconds: 500), () {
-                if (mounted) {
-                  _goToNextStep();
-                }
-              });
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Could not find video file: $fileName'),
-                  backgroundColor: Colors.red,
-                ),
-              );
+            
+            // Initialize video player if it's a video
+            if (!_isImageFile) {
+              _initializeVideoPlayer(videoFile);
             }
-          });
+            
+            // Passa al secondo step dopo un breve ritardo
+            Future.delayed(Duration(milliseconds: 500), () {
+              if (mounted) {
+                _goToNextStep();
+              }
+            });
+          } else {
+            // Try to find the file in the app's local storage
+            final fileName = videoPath.split('/').last;
+            getApplicationDocumentsDirectory().then((directory) {
+              final localPath = '${directory.path}/$fileName';
+              final localFile = File(localPath);
+              if (localFile.existsSync()) {
+                setState(() {
+                  _videoFile = localFile;
+                  _showCheckmark = true;
+                  _isImageFile = localPath.toLowerCase().endsWith('.jpg') || 
+                               localPath.toLowerCase().endsWith('.jpeg') || 
+                               localPath.toLowerCase().endsWith('.png');
+                  _isVideoFromUrl = false; // Reset flag for local files
+                });
+                
+                // Initialize video player if it's a video
+                if (!_isImageFile) {
+                  _initializeVideoPlayer(localFile);
+                }
+                
+                // Passa al secondo step dopo un breve ritardo
+                Future.delayed(Duration(milliseconds: 500), () {
+                  if (mounted) {
+                    _goToNextStep();
+                  }
+                });
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Could not find video file: $fileName'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            });
+          }
         }
       }
     }
@@ -868,78 +1008,156 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     }
   }
 
-  void _loadDraftData() {
+  void _loadDraftData() async {
     final draft = widget.draftData!;
     
-    // Set video file - handle both video_path and media_url
-    String? videoPath = draft['video_path'] ?? draft['media_url'];
-    if (videoPath != null) {
-      // Check if it's a URL (starts with http:// or https://)
-      if (videoPath.startsWith('http://') || videoPath.startsWith('https://')) {
-        _loadVideoFromUrl(videoPath);
-      } else {
-        // Handle local file path
-        final videoFile = File(videoPath);
+    // Check if there are multiple media (carousel) - prioritize video_paths
+    final videoPaths = draft['video_paths'] as List<dynamic>?;
+    
+    if (videoPaths != null && videoPaths.isNotEmpty) {
+      // Carousel: load all media from video_paths
+      List<File> loadedFiles = [];
+      List<bool> loadedIsImageFiles = [];
+      
+      for (var path in videoPaths) {
+        final String filePath = path.toString();
+        File? fileToAdd;
         
-        // Check if file exists
-        if (videoFile.existsSync()) {
-          setState(() {
-            _videoFile = videoFile;
-            _showCheckmark = true;
-            _isImageFile = videoPath.toLowerCase().endsWith('.jpg') || 
-                         videoPath.toLowerCase().endsWith('.jpeg') || 
-                         videoPath.toLowerCase().endsWith('.png');
-            _isVideoFromUrl = false; // Reset flag for local files
-          });
-          
-          // Initialize video player if it's a video
-          if (!_isImageFile) {
-            _initializeVideoPlayer(videoFile);
-          }
-          
-          // Passa al secondo step dopo un breve ritardo
-          Future.delayed(Duration(milliseconds: 500), () {
-            if (mounted) {
-              _goToNextStep();
-            }
-          });
+        // Check if file exists at the specified path
+        final file = File(filePath);
+        if (file.existsSync()) {
+          fileToAdd = file;
         } else {
-          // Try to find the file in the app's local storage
-          final fileName = videoPath.split('/').last;
-          getApplicationDocumentsDirectory().then((directory) {
-            final localPath = '${directory.path}/$fileName';
-            final localFile = File(localPath);
-            if (localFile.existsSync()) {
-                          setState(() {
-              _videoFile = localFile;
+          // Try to find the file in app_flutter directory
+          final fileName = filePath.split('/').last;
+          final appDocDir = await getApplicationDocumentsDirectory();
+          final localPath = '${appDocDir.path}/$fileName';
+          final localFile = File(localPath);
+          if (localFile.existsSync()) {
+            fileToAdd = localFile;
+          }
+        }
+        
+        if (fileToAdd != null) {
+          loadedFiles.add(fileToAdd);
+          final lowerPath = fileToAdd.path.toLowerCase();
+          final isImage = lowerPath.endsWith('.jpg') || 
+                         lowerPath.endsWith('.jpeg') || 
+                         lowerPath.endsWith('.png') ||
+                         lowerPath.endsWith('.gif') ||
+                         lowerPath.endsWith('.webp') ||
+                         lowerPath.endsWith('.bmp') ||
+                         lowerPath.endsWith('.heic') ||
+                         lowerPath.endsWith('.heif');
+          loadedIsImageFiles.add(isImage);
+        }
+      }
+      
+      if (loadedFiles.isNotEmpty) {
+        setState(() {
+          _videoFiles = loadedFiles;
+          _isImageFiles = loadedIsImageFiles;
+          _videoFile = loadedFiles[0];
+          _isImageFile = loadedIsImageFiles[0];
+          _showCheckmark = true;
+          _isVideoFromUrl = false;
+          _currentCarouselIndex = 0;
+          
+          // Initialize carousel controller if multiple files
+          if (loadedFiles.length > 1) {
+            _carouselController = PageController(initialPage: 0);
+          }
+        });
+        
+        // Initialize video player if first media is a video
+        if (!loadedIsImageFiles[0]) {
+          _initializeVideoPlayer(loadedFiles[0]);
+        }
+        
+        // Passa al secondo step dopo un breve ritardo
+        Future.delayed(Duration(milliseconds: 500), () {
+          if (mounted) {
+            _goToNextStep();
+          }
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not find any media files from draft'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } else {
+      // Single media: use existing logic with video_path or media_url
+      String? videoPath = draft['video_path'] ?? draft['media_url'];
+      if (videoPath != null) {
+        // Check if it's a URL (starts with http:// or https://)
+        if (videoPath.startsWith('http://') || videoPath.startsWith('https://')) {
+          _loadVideoFromUrl(videoPath);
+        } else {
+          // Handle local file path
+          final videoFile = File(videoPath);
+          
+          // Check if file exists
+          if (videoFile.existsSync()) {
+            setState(() {
+              _videoFile = videoFile;
               _showCheckmark = true;
-              _isImageFile = localPath.toLowerCase().endsWith('.jpg') || 
-                           localPath.toLowerCase().endsWith('.jpeg') || 
-                           localPath.toLowerCase().endsWith('.png');
-              _isVideoFromUrl = false; // Reset flag for local files
+              _isImageFile = videoPath.toLowerCase().endsWith('.jpg') || 
+                           videoPath.toLowerCase().endsWith('.jpeg') || 
+                           videoPath.toLowerCase().endsWith('.png');
               _isVideoFromUrl = false; // Reset flag for local files
             });
-              
-              // Initialize video player if it's a video
-              if (!_isImageFile) {
-                _initializeVideoPlayer(localFile);
-              }
-              
-              // Passa al secondo step dopo un breve ritardo
-              Future.delayed(Duration(milliseconds: 500), () {
-                if (mounted) {
-                  _goToNextStep();
-                }
-              });
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Could not find video file: $fileName'),
-                  backgroundColor: Colors.red,
-                ),
-              );
+            
+            // Initialize video player if it's a video
+            if (!_isImageFile) {
+              _initializeVideoPlayer(videoFile);
             }
-          });
+            
+            // Passa al secondo step dopo un breve ritardo
+            Future.delayed(Duration(milliseconds: 500), () {
+              if (mounted) {
+                _goToNextStep();
+              }
+            });
+          } else {
+            // Try to find the file in the app's local storage
+            final fileName = videoPath.split('/').last;
+            getApplicationDocumentsDirectory().then((directory) {
+              final localPath = '${directory.path}/$fileName';
+              final localFile = File(localPath);
+              if (localFile.existsSync()) {
+                setState(() {
+                  _videoFile = localFile;
+                  _showCheckmark = true;
+                  _isImageFile = localPath.toLowerCase().endsWith('.jpg') || 
+                               localPath.toLowerCase().endsWith('.jpeg') || 
+                               localPath.toLowerCase().endsWith('.png');
+                  _isVideoFromUrl = false; // Reset flag for local files
+                });
+                
+                // Initialize video player if it's a video
+                if (!_isImageFile) {
+                  _initializeVideoPlayer(localFile);
+                }
+                
+                // Passa al secondo step dopo un breve ritardo
+                Future.delayed(Duration(milliseconds: 500), () {
+                  if (mounted) {
+                    _goToNextStep();
+                  }
+                });
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Could not find video file: $fileName'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            });
+          }
         }
       }
     }
@@ -964,6 +1182,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       final accounts = draft['accounts'];
       if (accounts != null) {
         Map<String, List<String>> selectedAccountsTemp = {};
+        final Map<String, Map<String, dynamic>> accountSpecificContentTemp = {};
         
         (accounts as Map).forEach((key, value) {
           if (key is String) {
@@ -973,6 +1192,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             if (key.isNotEmpty) {
               platformKey = key[0].toUpperCase() + key.substring(1).toLowerCase();
             }
+            String normalizedPlatformKey = platformKey;
             
             List<String> accountIds = [];
             
@@ -981,30 +1201,50 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
               for (var account in value) {
                 if (account is Map) {
                   // Per YouTube, salva sia id che channel_id per garantire la corrispondenza
+                  String? resolvedAccountId;
                   if (platformKey == 'Youtube' || platformKey == 'YouTube') {
                     platformKey = 'YouTube'; // Normalizza il nome della piattaforma
+                    normalizedPlatformKey = 'YouTube';
                     
                     if (account.containsKey('channel_id')) {
-                      accountIds.add(account['channel_id'].toString());
+                      resolvedAccountId = account['channel_id'].toString();
                     } else if (account.containsKey('id')) {
-                      accountIds.add(account['id'].toString());
+                      resolvedAccountId = account['id'].toString();
                     } else if (account.containsKey('username')) {
-                      accountIds.add(account['username'].toString());
+                      resolvedAccountId = account['username'].toString();
                     }
                   } else {
                     // Per altre piattaforme, usa il metodo standard
                     if (account.containsKey('id')) {
-                      accountIds.add(account['id'].toString());
+                      resolvedAccountId = account['id'].toString();
                     } else if (account.containsKey('username')) {
-                      accountIds.add(account['username'].toString());
+                      resolvedAccountId = account['username'].toString();
                     }
+                  }
+
+                  if (resolvedAccountId != null && resolvedAccountId.isNotEmpty) {
+                    accountIds.add(resolvedAccountId);
+
+                    final String configKey = '${platformKey}_$resolvedAccountId';
+                    final String customTitle = ((account['title'] ?? '').toString()).trim();
+                    final String customDescription = ((account['description'] ?? '').toString()).trim();
+                    final bool hasCustomTitle = customTitle.isNotEmpty;
+                    final bool hasCustomDescription = customDescription.isNotEmpty;
+
+                    accountSpecificContentTemp[configKey] = {
+                      'useGlobalContent': !hasCustomDescription,
+                      'useAI': false,
+                      'title': customTitle,
+                      'description': customDescription,
+                      'prompt': '',
+                    };
                   }
                 }
               }
             }
             
             if (accountIds.isNotEmpty) {
-              selectedAccountsTemp[platformKey] = accountIds;
+              selectedAccountsTemp[normalizedPlatformKey] = accountIds;
             }
           }
         });
@@ -1013,6 +1253,12 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         // Li sostituiremo con gli ID corretti dopo aver caricato gli account
         _selectedAccounts.clear();
         _selectedAccounts.addAll(selectedAccountsTemp);
+
+        if (accountSpecificContentTemp.isNotEmpty) {
+          _accountSpecificContent = accountSpecificContentTemp;
+        } else {
+          _accountSpecificContent = {};
+        }
         
         print('Loaded accounts (preliminary): $_selectedAccounts');
       }
@@ -1031,13 +1277,14 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   void _toggleAccount(String platform, String accountId) {
     print('Toggling account selection: Platform=$platform, AccountID=$accountId');
     
-    // Check if trying to select YouTube account with image file
-    if (platform == 'YouTube' && _isImageFile && !(_selectedAccounts[platform]?.contains(accountId) ?? false)) {
+    // Check if trying to select non-Instagram account with multiple media
+    final bool hasMultipleMedia = _videoFiles.length > 1;
+    if (hasMultipleMedia && platform != 'Instagram') {
       // Show warning message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'YouTube does not support image uploads. Please select a video file.',
+            'Only Instagram supports multi-media uploads. Please select Instagram accounts only.',
             style: TextStyle(fontSize: 14, color: Colors.black),
             textAlign: TextAlign.center,
           ),
@@ -1050,6 +1297,27 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         ),
       );
       return; // Prevent selection
+    }
+    
+    // Check if trying to toggle YouTube account with image file
+    if (platform == 'YouTube' && _isImageFile) {
+      // Show warning message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'You cannot publish images on YouTube',
+            style: TextStyle(fontSize: 14, color: Colors.black),
+            textAlign: TextAlign.center,
+          ),
+          backgroundColor: Colors.white,
+          duration: Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          margin: EdgeInsets.all(16),
+          elevation: 2,
+        ),
+      );
+      return; // Prevent selection/deselection
     }
     
     // Prima verifica se l'account è già selezionato
@@ -1104,6 +1372,714 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     );
   }
 
+  // Metodi per i picker a rullo (simili a settings_page.dart)
+  
+  // Helper method per ottenere il nome della categoria YouTube
+  String _getYouTubeCategoryName(String categoryId) {
+    final categories = {
+      '1': 'Film & Animation',
+      '2': 'Autos & Vehicles',
+      '10': 'Music',
+      '15': 'Pets & Animals',
+      '17': 'Sports',
+      '19': 'Travel & Events',
+      '20': 'Gaming',
+      '22': 'People & Blogs',
+      '23': 'Comedy',
+      '24': 'Entertainment',
+      '25': 'News & Politics',
+      '26': 'Howto & Style',
+      '27': 'Education',
+      '28': 'Science & Technology',
+    };
+    return categories[categoryId] ?? 'People & Blogs';
+  }
+  
+  // Helper method per ottenere il nome della privacy YouTube
+  String _getYouTubePrivacyName(String privacyStatus) {
+    final privacyOptions = {
+      'public': 'Public',
+      'unlisted': 'Unlisted',
+      'private': 'Private',
+    };
+    return privacyOptions[privacyStatus] ?? 'Public';
+  }
+  
+  // Helper method per ottenere il nome della licenza YouTube
+  String _getYouTubeLicenseName(String license) {
+    final licenseOptions = {
+      'youtube': 'Standard YouTube License',
+      'creativeCommon': 'Creative Commons - Attribution',
+    };
+    return licenseOptions[license] ?? 'Standard YouTube License';
+  }
+  
+  // Helper method per ottenere il nome del privacy level TikTok
+  String _getTikTokPrivacyLevelName(String? privacyLevel) {
+    if (privacyLevel == null) return 'Select privacy level (required)';
+    final privacyOptions = {
+      'SELF_ONLY': 'Private (Only me)',
+      'FRIENDS': 'Friends',
+      'PUBLIC': 'Public',
+    };
+    return privacyOptions[privacyLevel] ?? 'Select privacy level (required)';
+  }
+  
+  // YouTube Category Picker
+  void _showYouTubeCategoryPicker(String accountId, StateSetter dialogSetState) {
+    final theme = Theme.of(context);
+    final categories = {
+      '1': 'Film & Animation',
+      '2': 'Autos & Vehicles',
+      '10': 'Music',
+      '15': 'Pets & Animals',
+      '17': 'Sports',
+      '19': 'Travel & Events',
+      '20': 'Gaming',
+      '22': 'People & Blogs',
+      '23': 'Comedy',
+      '24': 'Entertainment',
+      '25': 'News & Politics',
+      '26': 'Howto & Style',
+      '27': 'Education',
+      '28': 'Science & Technology',
+    };
+    
+    final currentValue = _youtubeOptions[accountId]?['categoryId'] ?? '22';
+    final categoryKeys = categories.keys.toList();
+    final currentIndex = categoryKeys.indexOf(currentValue);
+    
+    if (Platform.isIOS) {
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (BuildContext context) => Container(
+          height: 216,
+          padding: const EdgeInsets.only(top: 6.0),
+          margin: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          color: CupertinoColors.systemBackground.resolveFrom(context),
+          child: SafeArea(
+            top: false,
+            child: CupertinoPicker(
+              magnification: 1.22,
+              squeeze: 1.2,
+              useMagnifier: true,
+              itemExtent: 32.0,
+              scrollController: FixedExtentScrollController(
+                initialItem: currentIndex >= 0 ? currentIndex : 7,
+              ),
+              onSelectedItemChanged: (int selectedItem) {
+                final selectedKey = categoryKeys[selectedItem];
+                dialogSetState(() {
+                  if (!_youtubeOptions.containsKey(accountId)) {
+                    _youtubeOptions[accountId] = {
+                      'categoryId': '22',
+                      'privacyStatus': 'public',
+                      'license': 'youtube',
+                      'notifySubscribers': true,
+                      'embeddable': true,
+                      'madeForKids': false,
+                    };
+                  }
+                  _youtubeOptions[accountId]!['categoryId'] = selectedKey;
+                });
+              },
+              children: List<Widget>.generate(categories.length, (int index) {
+                return Center(
+                  child: Text(
+                    categories[categoryKeys[index]]!,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) {
+          return Container(
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.only(top: 16, bottom: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    ).createShader(bounds);
+                  },
+                  child: Text(
+                    'Select Category',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 180,
+                  child: CupertinoPicker(
+                    backgroundColor: Colors.transparent,
+                    itemExtent: 40,
+                    scrollController: FixedExtentScrollController(
+                      initialItem: currentIndex >= 0 ? currentIndex : 7,
+                    ),
+                    onSelectedItemChanged: (int index) {
+                      final selectedKey = categoryKeys[index];
+                      dialogSetState(() {
+                        if (!_youtubeOptions.containsKey(accountId)) {
+                          _youtubeOptions[accountId] = {
+                            'categoryId': '22',
+                            'privacyStatus': 'public',
+                            'license': 'youtube',
+                            'notifySubscribers': true,
+                            'embeddable': true,
+                            'madeForKids': false,
+                          };
+                        }
+                        _youtubeOptions[accountId]!['categoryId'] = selectedKey;
+                      });
+                    },
+                    children: categoryKeys.map((key) => Center(
+                      child: Text(
+                        categories[key]!,
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    )).toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  // YouTube Privacy Picker
+  void _showYouTubePrivacyPicker(String accountId, StateSetter dialogSetState) {
+    final theme = Theme.of(context);
+    final privacyOptions = {
+      'public': 'Public',
+      'unlisted': 'Unlisted',
+      'private': 'Private',
+    };
+    
+    final currentValue = _youtubeOptions[accountId]?['privacyStatus'] ?? 'public';
+    final privacyKeys = privacyOptions.keys.toList();
+    final currentIndex = privacyKeys.indexOf(currentValue);
+    
+    if (Platform.isIOS) {
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (BuildContext context) => Container(
+          height: 216,
+          padding: const EdgeInsets.only(top: 6.0),
+          margin: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          color: CupertinoColors.systemBackground.resolveFrom(context),
+          child: SafeArea(
+            top: false,
+            child: CupertinoPicker(
+              magnification: 1.22,
+              squeeze: 1.2,
+              useMagnifier: true,
+              itemExtent: 32.0,
+              scrollController: FixedExtentScrollController(
+                initialItem: currentIndex >= 0 ? currentIndex : 0,
+              ),
+              onSelectedItemChanged: (int selectedItem) {
+                final selectedKey = privacyKeys[selectedItem];
+                dialogSetState(() {
+                  if (!_youtubeOptions.containsKey(accountId)) {
+                    _youtubeOptions[accountId] = {
+                      'categoryId': '22',
+                      'privacyStatus': 'public',
+                      'license': 'youtube',
+                      'notifySubscribers': true,
+                      'embeddable': true,
+                      'madeForKids': false,
+                    };
+                  }
+                  _youtubeOptions[accountId]!['privacyStatus'] = selectedKey;
+                });
+              },
+              children: List<Widget>.generate(privacyOptions.length, (int index) {
+                return Center(
+                  child: Text(
+                    privacyOptions[privacyKeys[index]]!,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) {
+          return Container(
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.only(top: 16, bottom: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    ).createShader(bounds);
+                  },
+                  child: Text(
+                    'Select Visibility',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 180,
+                  child: CupertinoPicker(
+                    backgroundColor: Colors.transparent,
+                    itemExtent: 40,
+                    scrollController: FixedExtentScrollController(
+                      initialItem: currentIndex >= 0 ? currentIndex : 0,
+                    ),
+                    onSelectedItemChanged: (int index) {
+                      final selectedKey = privacyKeys[index];
+                      dialogSetState(() {
+                        if (!_youtubeOptions.containsKey(accountId)) {
+                          _youtubeOptions[accountId] = {
+                            'categoryId': '22',
+                            'privacyStatus': 'public',
+                            'license': 'youtube',
+                            'notifySubscribers': true,
+                            'embeddable': true,
+                            'madeForKids': false,
+                          };
+                        }
+                        _youtubeOptions[accountId]!['privacyStatus'] = selectedKey;
+                      });
+                    },
+                    children: privacyKeys.map((key) => Center(
+                      child: Text(
+                        privacyOptions[key]!,
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    )).toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  // YouTube License Picker
+  void _showYouTubeLicensePicker(String accountId, StateSetter dialogSetState) {
+    final theme = Theme.of(context);
+    final licenseOptions = {
+      'youtube': 'Standard YouTube License',
+      'creativeCommon': 'Creative Commons - Attribution',
+    };
+    
+    final currentValue = _youtubeOptions[accountId]?['license'] ?? 'youtube';
+    final licenseKeys = licenseOptions.keys.toList();
+    final currentIndex = licenseKeys.indexOf(currentValue);
+    
+    if (Platform.isIOS) {
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (BuildContext context) => Container(
+          height: 216,
+          padding: const EdgeInsets.only(top: 6.0),
+          margin: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          color: CupertinoColors.systemBackground.resolveFrom(context),
+          child: SafeArea(
+            top: false,
+            child: CupertinoPicker(
+              magnification: 1.22,
+              squeeze: 1.2,
+              useMagnifier: true,
+              itemExtent: 32.0,
+              scrollController: FixedExtentScrollController(
+                initialItem: currentIndex >= 0 ? currentIndex : 0,
+              ),
+              onSelectedItemChanged: (int selectedItem) {
+                final selectedKey = licenseKeys[selectedItem];
+                dialogSetState(() {
+                  if (!_youtubeOptions.containsKey(accountId)) {
+                    _youtubeOptions[accountId] = {
+                      'categoryId': '22',
+                      'privacyStatus': 'public',
+                      'license': 'youtube',
+                      'notifySubscribers': true,
+                      'embeddable': true,
+                      'madeForKids': false,
+                    };
+                  }
+                  _youtubeOptions[accountId]!['license'] = selectedKey;
+                });
+              },
+              children: List<Widget>.generate(licenseOptions.length, (int index) {
+                return Center(
+                  child: Text(
+                    licenseOptions[licenseKeys[index]]!,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) {
+          return Container(
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.only(top: 16, bottom: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    ).createShader(bounds);
+                  },
+                  child: Text(
+                    'Select License',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 180,
+                  child: CupertinoPicker(
+                    backgroundColor: Colors.transparent,
+                    itemExtent: 40,
+                    scrollController: FixedExtentScrollController(
+                      initialItem: currentIndex >= 0 ? currentIndex : 0,
+                    ),
+                    onSelectedItemChanged: (int index) {
+                      final selectedKey = licenseKeys[index];
+                      dialogSetState(() {
+                        if (!_youtubeOptions.containsKey(accountId)) {
+                          _youtubeOptions[accountId] = {
+                            'categoryId': '22',
+                            'privacyStatus': 'public',
+                            'license': 'youtube',
+                            'notifySubscribers': true,
+                            'embeddable': true,
+                            'madeForKids': false,
+                          };
+                        }
+                        _youtubeOptions[accountId]!['license'] = selectedKey;
+                      });
+                    },
+                    children: licenseKeys.map((key) => Center(
+                      child: Text(
+                        licenseOptions[key]!,
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    )).toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  // TikTok Privacy Level Picker
+  void _showTikTokPrivacyLevelPicker(String accountId, StateSetter dialogSetState) {
+    final theme = Theme.of(context);
+    final privacyOptions = {
+      'SELF_ONLY': 'Private (Only me)',
+      'FRIENDS': 'Friends',
+      'PUBLIC': 'Public',
+    };
+    
+    final currentValue = _tiktokOptions[accountId]?['privacy_level'];
+    final privacyKeys = privacyOptions.keys.toList();
+    final currentIndex = currentValue != null ? privacyKeys.indexOf(currentValue) : -1;
+    
+    if (Platform.isIOS) {
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (BuildContext context) => Container(
+          height: 216,
+          padding: const EdgeInsets.only(top: 6.0),
+          margin: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          color: CupertinoColors.systemBackground.resolveFrom(context),
+          child: SafeArea(
+            top: false,
+            child: CupertinoPicker(
+              magnification: 1.22,
+              squeeze: 1.2,
+              useMagnifier: true,
+              itemExtent: 32.0,
+              scrollController: FixedExtentScrollController(
+                initialItem: currentIndex >= 0 ? currentIndex : 0,
+              ),
+              onSelectedItemChanged: (int selectedItem) {
+                final selectedKey = privacyKeys[selectedItem];
+                dialogSetState(() {
+                  if (!_tiktokOptions.containsKey(accountId)) {
+                    _tiktokOptions[accountId] = {
+                      'privacy_level': null,
+                      'allow_comments': true,
+                      'allow_duets': true,
+                      'allow_stitch': true,
+                      'commercial_content': false,
+                      'own_brand': false,
+                      'branded_content': false,
+                    };
+                  }
+                  _tiktokOptions[accountId]!['privacy_level'] = selectedKey;
+                  
+                  // Handle commercial content restrictions
+                  if (selectedKey == 'SELF_ONLY' && _tiktokOptions[accountId]!['branded_content']) {
+                    _tiktokOptions[accountId]!['branded_content'] = false;
+                    _tiktokOptions[accountId]!['commercial_content'] = false;
+                  }
+                });
+              },
+              children: List<Widget>.generate(privacyOptions.length, (int index) {
+                return Center(
+                  child: Text(
+                    privacyOptions[privacyKeys[index]]!,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) {
+          return Container(
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.only(top: 16, bottom: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      transform: GradientRotation(135 * 3.14159 / 180),
+                    ).createShader(bounds);
+                  },
+                  child: Text(
+                    'Select Privacy Level',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 180,
+                  child: CupertinoPicker(
+                    backgroundColor: Colors.transparent,
+                    itemExtent: 40,
+                    scrollController: FixedExtentScrollController(
+                      initialItem: currentIndex >= 0 ? currentIndex : 0,
+                    ),
+                    onSelectedItemChanged: (int index) {
+                      final selectedKey = privacyKeys[index];
+                      dialogSetState(() {
+                        if (!_tiktokOptions.containsKey(accountId)) {
+                          _tiktokOptions[accountId] = {
+                            'privacy_level': null,
+                            'allow_comments': true,
+                            'allow_duets': true,
+                            'allow_stitch': true,
+                            'commercial_content': false,
+                            'own_brand': false,
+                            'branded_content': false,
+                          };
+                        }
+                        _tiktokOptions[accountId]!['privacy_level'] = selectedKey;
+                        
+                        // Handle commercial content restrictions
+                        if (selectedKey == 'SELF_ONLY' && _tiktokOptions[accountId]!['branded_content']) {
+                          _tiktokOptions[accountId]!['branded_content'] = false;
+                          _tiktokOptions[accountId]!['commercial_content'] = false;
+                        }
+                      });
+                    },
+                    children: privacyKeys.map((key) => Center(
+                      child: Text(
+                        privacyOptions[key]!,
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    )).toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+  }
 
   // Nuovo metodo per mostrare il popup di configurazione dell'account
   void _showAccountConfigBottomSheet(String platform, String accountId) {
@@ -1140,6 +2116,18 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       _platformDescriptionControllers[platform]!.text = _descriptionController.text;
     }
     
+    // Inizializza le opzioni YouTube se la piattaforma è YouTube
+    if (platform == 'YouTube' && !_youtubeOptions.containsKey(accountId)) {
+      _youtubeOptions[accountId] = {
+        'categoryId': '22',
+        'privacyStatus': 'public',
+        'license': 'youtube',
+        'notifySubscribers': true,
+        'embeddable': true,
+        'madeForKids': false,
+      };
+    }
+    
     // Creiamo un ID univoco per questo account
     final String accountConfigId = "${platform}_${accountId}";
     
@@ -1167,7 +2155,23 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     bool useAI = accountConfig['useAI'] ?? false;
     bool isGeneratingDescription = false;
     
+    // Variabile per lo snackbar dei crediti insufficienti nella tendina
+    bool showInsufficientCreditsSnackbar = false;
 
+    // ValueNotifier per tracciare lo scroll offset in modo persistente
+    final ValueNotifier<double> scrollOffsetNotifier = ValueNotifier<double>(0.0);
+    
+    // Scroll controller per tracciare lo scroll e nascondere il toggle
+    final ScrollController scrollController = ScrollController();
+    
+    // Aggiungi listener per tracciare lo scroll
+    scrollController.addListener(() {
+      final newOffset = scrollController.offset;
+      final currentOffset = scrollOffsetNotifier.value;
+      if ((newOffset - currentOffset).abs() > 5) { // Throttle updates
+        scrollOffsetNotifier.value = newOffset;
+      }
+    });
     
     showModalBottomSheet(
       context: context,
@@ -1184,8 +2188,14 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             //   // Update parent's state
             //   setState(fn);
             // }
+            return ValueListenableBuilder<double>(
+              valueListenable: scrollOffsetNotifier,
+              builder: (context, scrollOffset, _) {
+                // Calcola l'opacità in base allo scroll (nascondi dopo 20px di scroll)
+                final double toggleOpacity = scrollOffset > 20 ? 0.0 : 1.0;
+            
             return Container(
-              height: MediaQuery.of(context).size.height * 0.8,
+              height: MediaQuery.of(context).size.height * 0.9,
               decoration: BoxDecoration(
                 color: isDark ? Color(0xFF1E1E1E) : Colors.white,
                 borderRadius: BorderRadius.only(
@@ -1263,8 +2273,16 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                     ),
                     Divider(height: 20, color: isDark ? Colors.grey[800] : null),
                     
-                    // Content toggle
-                    Padding(
+                    // Content toggle - si nasconde quando si scrolla e libera lo spazio
+                    AnimatedSize(
+                      duration: Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      child: Visibility(
+                        visible: scrollOffset <= 20,
+                        maintainSize: false,
+                        maintainAnimation: false,
+                        maintainState: false,
+                        child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1305,12 +2323,15 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                             activeColor: Color(0xFF667eea),
                           ),
                         ],
+                          ),
+                        ),
                       ),
                     ),
                     
                     // Contenuto scrollabile - ottimizzato per performance
                     Expanded(
                       child: SingleChildScrollView(
+                        controller: scrollController,
                         padding: const EdgeInsets.all(20),
                         physics: BouncingScrollPhysics(), // Fisica più fluida
                         child: Column(
@@ -1546,6 +2567,14 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                                   onPressed: isGeneratingDescription 
                                                     ? null 
                                                     : () async {
+                                                        // Controlla se l'utente ha abbastanza crediti
+                                                        if (!_isPremium && _userCredits < 7) {
+                                                          dialogSetState(() {
+                                                            showInsufficientCreditsSnackbar = true;
+                                                          });
+                                                          return;
+                                                        }
+                                                        
                                                         dialogSetState(() {
                                                           isGeneratingDescription = true;
                                                         });
@@ -1645,7 +2674,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                           else
                                             SizedBox.shrink(),
                                       Text(
-                                            '${descriptionController.text.length} / ${_getCharacterLimitForPlatformAndAccount(platform, accountId)}',
+                                            '${descriptionController.text.length} / ${_getCharacterLimitForPlatformAndAccount(platform, accountId)}',
                                         style: TextStyle(
                                           color: isDark ? Colors.grey[400] : Colors.grey[600],
                                           fontSize: 12,
@@ -1689,10 +2718,12 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                     ),
                                     SizedBox(height: 12),
                                     
-                                    // Privacy Level Dropdown
-                                    Container(
+                                    // Privacy Level Picker
+                                    GestureDetector(
+                                      onTap: () => _showTikTokPrivacyLevelPicker(accountId, dialogSetState),
+                                      child: Container(
                                       width: double.infinity,
-                                      padding: EdgeInsets.symmetric(horizontal: 12),
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                                       decoration: BoxDecoration(
                                         color: isDark ? Colors.grey[700] : Colors.white,
                                         borderRadius: BorderRadius.circular(8),
@@ -1701,64 +2732,23 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                           width: 1,
                                         ),
                                       ),
-                                      child: DropdownButtonHideUnderline(
-                                        child: DropdownButton<String>(
-                                          value: _tiktokOptions[accountId]?['privacy_level'],
-                                          hint: Text(
-                                            'Select privacy level (required)',
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                _getTikTokPrivacyLevelName(_tiktokOptions[accountId]?['privacy_level']),
                                             style: TextStyle(
-                                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                  color: isDark ? Colors.white : Colors.black87,
                                               fontSize: 14,
                                             ),
                                           ),
-                                          isExpanded: true,
-                                          icon: Icon(
+                                            ),
+                                            Icon(
                                             Icons.arrow_drop_down,
                                             color: isDark ? Colors.grey[400] : Colors.grey[600],
-                                          ),
-                                          items: [
-                                            DropdownMenuItem(
-                                              value: 'SELF_ONLY',
-                                              child: Text('Private (Only me)'),
-                                            ),
-                                            DropdownMenuItem(
-                                              value: 'FRIENDS',
-                                              child: Text('Friends'),
-                                            ),
-                                            DropdownMenuItem(
-                                              value: 'PUBLIC',
-                                              child: Text('Public'),
                                             ),
                                           ],
-                                          onChanged: (String? newValue) {
-                                            dialogSetState(() {
-                                              // Initialize TikTok options for this account if not exists
-                                              if (!_tiktokOptions.containsKey(accountId)) {
-                                                _tiktokOptions[accountId] = {
-                                                  'privacy_level': null,
-                                                  'allow_comments': true,
-                                                  'allow_duets': true,
-                                                  'allow_stitch': true,
-                                                  'commercial_content': false,
-                                                  'own_brand': false,
-                                                  'branded_content': false,
-                                                };
-                                              }
-                                              
-                                              _tiktokOptions[accountId]!['privacy_level'] = newValue;
-                                              
-                                              // Handle commercial content restrictions
-                                              if (newValue == 'SELF_ONLY' && _tiktokOptions[accountId]!['branded_content']) {
-                                                _tiktokOptions[accountId]!['branded_content'] = false;
-                                                _tiktokOptions[accountId]!['commercial_content'] = false;
-                                              }
-                                            });
-                                          },
-                                          dropdownColor: isDark ? Colors.grey[700] : Colors.white,
-                                          style: TextStyle(
-                                            color: isDark ? Colors.white : Colors.black87,
-                                            fontSize: 14,
-                                          ),
                                         ),
                                       ),
                                     ),
@@ -2079,6 +3069,278 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                   ],
                                 ),
                             
+                              // Sezione impostazioni YouTube
+                              if (platform == 'YouTube' && !_isImageFile)
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(height: 20),
+                                    Text(
+                                      'YouTube Settings',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 12),
+                                    
+                                    // Categoria del video
+                                    Text(
+                                      'Category',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    GestureDetector(
+                                      onTap: () => _showYouTubeCategoryPicker(accountId, dialogSetState),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          color: isDark ? Colors.grey[700] : Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                _getYouTubeCategoryName(_youtubeOptions[accountId]?['categoryId'] ?? '22'),
+                                                style: TextStyle(
+                                                  color: isDark ? Colors.white : Colors.black87,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(
+                                              Icons.arrow_drop_down,
+                                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(height: 16),
+                                    
+                                    // Visibilità
+                                    Text(
+                                      'Visibility',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    GestureDetector(
+                                      onTap: () => _showYouTubePrivacyPicker(accountId, dialogSetState),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          color: isDark ? Colors.grey[700] : Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                _getYouTubePrivacyName(_youtubeOptions[accountId]?['privacyStatus'] ?? 'public'),
+                                                style: TextStyle(
+                                                  color: isDark ? Colors.white : Colors.black87,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(
+                                              Icons.arrow_drop_down,
+                                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(height: 16),
+                                    
+                                    // Licenza
+                                    Text(
+                                      'License',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    GestureDetector(
+                                      onTap: () => _showYouTubeLicensePicker(accountId, dialogSetState),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          color: isDark ? Colors.grey[700] : Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                _getYouTubeLicenseName(_youtubeOptions[accountId]?['license'] ?? 'youtube'),
+                                                style: TextStyle(
+                                                  color: isDark ? Colors.white : Colors.black87,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(
+                                              Icons.arrow_drop_down,
+                                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(height: 16),
+                                    
+                                    // Toggle settings
+                                    Text(
+                                      'Additional Settings',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 12),
+                                    
+                                    // Notify Subscribers
+                                    SwitchListTile(
+                                      title: Text(
+                                        'Notify subscribers',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Send notification to subscribers when video is published',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                        ),
+                                      ),
+                                      value: _youtubeOptions[accountId]?['notifySubscribers'] ?? true,
+                                      onChanged: (bool value) {
+                                        dialogSetState(() {
+                                          if (!_youtubeOptions.containsKey(accountId)) {
+                                            _youtubeOptions[accountId] = {
+                                              'categoryId': '22',
+                                              'privacyStatus': 'public',
+                                              'license': 'youtube',
+                                              'notifySubscribers': true,
+                                              'embeddable': true,
+                                              'madeForKids': false,
+                                            };
+                                          }
+                                          _youtubeOptions[accountId]!['notifySubscribers'] = value;
+                                        });
+                                      },
+                                      activeColor: Color(0xFF667eea),
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                    
+                                    // Allow Embedding
+                                    SwitchListTile(
+                                      title: Text(
+                                        'Allow embedding',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Allow others to embed this video on their websites',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                        ),
+                                      ),
+                                      value: _youtubeOptions[accountId]?['embeddable'] ?? true,
+                                      onChanged: (bool value) {
+                                        dialogSetState(() {
+                                          if (!_youtubeOptions.containsKey(accountId)) {
+                                            _youtubeOptions[accountId] = {
+                                              'categoryId': '22',
+                                              'privacyStatus': 'public',
+                                              'license': 'youtube',
+                                              'notifySubscribers': true,
+                                              'embeddable': true,
+                                              'madeForKids': false,
+                                            };
+                                          }
+                                          _youtubeOptions[accountId]!['embeddable'] = value;
+                                        });
+                                      },
+                                      activeColor: Color(0xFF667eea),
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                    
+                                    // Made for Kids
+                                    SwitchListTile(
+                                      title: Text(
+                                        'Made for Kids',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Indicate if this video is made for kids',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                        ),
+                                      ),
+                                      value: _youtubeOptions[accountId]?['madeForKids'] ?? false,
+                                      onChanged: (bool value) {
+                                        dialogSetState(() {
+                                          if (!_youtubeOptions.containsKey(accountId)) {
+                                            _youtubeOptions[accountId] = {
+                                              'categoryId': '22',
+                                              'privacyStatus': 'public',
+                                              'license': 'youtube',
+                                              'notifySubscribers': true,
+                                              'embeddable': true,
+                                              'madeForKids': false,
+                                            };
+                                          }
+                                          _youtubeOptions[accountId]!['madeForKids'] = value;
+                                        });
+                                      },
+                                      activeColor: Color(0xFF667eea),
+                                      contentPadding: EdgeInsets.zero,
+                                      ),
+                                  ],
+                                ),
+                            
                               // Sezione thumbnail personalizzata SOLO per YouTube verificato
                               if (platform == 'YouTube' && !_isImageFile && _isYouTubeAccountVerified(accountId))
                               Column(
@@ -2185,31 +3447,27 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                                     ),
                                                   ),
                                                   SizedBox(height: 16),
-                                                                                                      Container(
-                                                    decoration: BoxDecoration(
-                                                      gradient: LinearGradient(
+                                                  GestureDetector(
+                                                    onTap: () => _pickYouTubeThumbnail(dialogSetState),
+                                                    child: ShaderMask(
+                                                      shaderCallback: (Rect bounds) {
+                                                        return LinearGradient(
                                                         colors: [
                                                           Color(0xFF667eea), // Colore iniziale: blu violaceo
                                                           Color(0xFF764ba2), // Colore finale: viola
                                                         ],
                                                         begin: Alignment.topLeft,
                                                         end: Alignment.bottomRight,
-                                                        transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
-                                                      ),
-                                                      borderRadius: BorderRadius.circular(8),
-                                                    ),
-                                                    child: ElevatedButton.icon(
-                                                      onPressed: () => _pickYouTubeThumbnail(dialogSetState),
-                                                    icon: Icon(Icons.upload_file, size: 18),
-                                                    label: Text('Select Thumbnail'),
-                                                    style: ElevatedButton.styleFrom(
-                                                        backgroundColor: Colors.transparent,
-                                                      foregroundColor: Colors.white,
-                                                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(8),
+                                                          transform: GradientRotation(135 * 3.14159 / 180),
+                                                        ).createShader(bounds);
+                                                      },
+                                                      child: Text(
+                                                        'Select Thumbnail',
+                                                        style: theme.textTheme.titleMedium?.copyWith(
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.white,
+                                                          fontSize: 18,
                                                         ),
-                                                        elevation: 0,
                                                       ),
                                                     ),
                                                   ),
@@ -2268,6 +3526,78 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                       ),
                     ),
                     
+                    // Snackbar crediti insufficienti
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: showInsufficientCreditsSnackbar
+                          ? Container(
+                              key: const ValueKey('insufficient_credits_snackbar'),
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Colors.orange,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Insufficient credits.',
+                                      style: TextStyle(
+                                        color: Colors.black,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      dialogSetState(() {
+                                        showInsufficientCreditsSnackbar = false;
+                                      });
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => const CreditsPage(),
+                                        ),
+                                      );
+                                    },
+                                    style: TextButton.styleFrom(
+                                      backgroundColor: Colors.orange,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      minimumSize: Size(100, 32),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Get Credits',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : SizedBox.shrink(),
+                    ),
+                    
                     // Bottoni di azione
                     Container(
                        padding: const EdgeInsets.all(12),
@@ -2284,6 +3614,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                       child: Row(
                         children: [
                           Expanded(
+                            flex: 1,
                             child: OutlinedButton(
                               onPressed: () {
                                 Navigator.pop(context);
@@ -2321,6 +3652,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                           ),
                           SizedBox(width: 16),
                           Expanded(
+                            flex: 2,
                             child: Container(
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
@@ -2359,6 +3691,21 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                     };
                                   }
                                   // Le opzioni TikTok sono già state aggiornate durante l'interazione dell'utente
+                                }
+                                
+                                // Salva le opzioni YouTube se la piattaforma è YouTube
+                                if (platform == 'YouTube') {
+                                  if (!_youtubeOptions.containsKey(accountId)) {
+                                    _youtubeOptions[accountId] = {
+                                      'categoryId': '22',
+                                      'privacyStatus': 'public',
+                                      'license': 'youtube',
+                                      'notifySubscribers': true,
+                                      'embeddable': true,
+                                      'madeForKids': false,
+                                    };
+                                  }
+                                  // Le opzioni YouTube sono già state aggiornate durante l'interazione dell'utente
                                 }
                                 
                                 // Update ChatGPT flag for this platform
@@ -2407,11 +3754,17 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   ],
                 ),
               ),
+              );
+              },
             );
           }
         );
       },
-    );
+    ).then((_) {
+      // Dispose degli oggetti quando il bottom sheet viene chiuso
+      scrollController.dispose();
+      scrollOffsetNotifier.dispose();
+    });
   }
 
   // Method to check if YouTube account is verified
@@ -2655,41 +4008,16 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   ),
                   child: Column(
                     children: [
-                      // Immagine dalla galleria
-                      _buildMediaOptionTile(
-                        context,
-                        Icons.photo_library_outlined,
-                        'Image from gallery',
-                        'Upload an image from your device',
-                        BorderRadius.only(
-                          topLeft: Radius.circular(16),
-                          topRight: Radius.circular(16),
-                        ),
-                        () async {
-                          Navigator.pop(context);
-                          // Richiedi permesso specifico per la galleria
-                          if (await _requestGalleryPermission()) {
-                            final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-                            if (image != null) {
-                              setState(() {
-                                _videoFile = File(image.path);
-                                _showCheckmark = true;
-                                _isImageFile = true;
-                              });
-                              // Go directly to step 2
-                              _goToNextStep();
-                            }
-                          }
-                        },
-                      ),
-                      Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: theme.brightness == Brightness.dark ? Colors.grey[800] : Colors.grey.shade200),
-                      // Video dalla galleria
+                      // Video dalla galleria (1a voce)
                       _buildMediaOptionTile(
                         context,
                         Icons.videocam_outlined,
                         'Video from gallery',
                         'Upload a video from your device',
-                        null,
+                        BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          topRight: Radius.circular(16),
+                        ),
                         () async {
                           Navigator.pop(context);
                           // Richiedi permesso specifico per la galleria
@@ -2709,7 +4037,47 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                         },
                       ),
                       Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: theme.brightness == Brightness.dark ? Colors.grey[800] : Colors.grey.shade200),
-                      // Scatta foto
+                      // Immagine dalla galleria (2a voce)
+                      _buildMediaOptionTile(
+                        context,
+                        Icons.photo_library_outlined,
+                        'Image from gallery',
+                        'Upload an image from your device',
+                        null,
+                        () async {
+                          Navigator.pop(context);
+                          // Richiedi permesso specifico per la galleria
+                          if (await _requestGalleryPermission()) {
+                            final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+                            if (image != null) {
+                              setState(() {
+                                _videoFile = File(image.path);
+                                _showCheckmark = true;
+                                _isImageFile = true;
+                              });
+                              // Go directly to step 2
+                              _goToNextStep();
+                            }
+                          }
+                        },
+                      ),
+                      Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: theme.brightness == Brightness.dark ? Colors.grey[800] : Colors.grey.shade200),
+                      // Multiple media from gallery - SOLO IMMAGINI (3a voce)
+                      _buildMediaOptionTile(
+                        context,
+                        Icons.collections_outlined,
+                        'Select Multiple Images',
+                        '(For Instagram carousel only)',
+                        null,
+                        () async {
+                          Navigator.pop(context);
+                          if (await _requestGalleryPermission()) {
+                            await _pickMultipleMedia();
+                          }
+                        },
+                      ),
+                      Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: theme.brightness == Brightness.dark ? Colors.grey[800] : Colors.grey.shade200),
+                      // Scatta foto (4a voce)
                       _buildMediaOptionTile(
                         context,
                         Icons.photo_camera_outlined,
@@ -2734,7 +4102,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                         },
                       ),
                       Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: theme.brightness == Brightness.dark ? Colors.grey[800] : Colors.grey.shade200),
-                      // Registra video
+                      // Registra video (5a voce)
                       _buildMediaOptionTile(
                         context,
                         Icons.videocam,
@@ -2805,6 +4173,223 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         );
       }
       return;
+    }
+  }
+
+  /// Metodo per selezionare multipli media dalla galleria
+  Future<void> _pickMultipleMedia({bool append = false}) async {
+    try {
+      // Calcola quante foto ci sono già (se append è true)
+      final int currentCount = append ? _videoFiles.length : 0;
+      final int maxAllowed = 10; // Limite massimo di 10 foto per il carosello
+      final int remainingSlots = maxAllowed - currentCount;
+      
+      // Se abbiamo già raggiunto il limite, mostra un messaggio e interrompi
+      if (currentCount >= maxAllowed) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Maximum $maxAllowed images allowed for carousel. Please remove some images first.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Usa pickMultipleMedia ma filtrando SOLO le immagini (niente video) per il carosello Instagram
+      final List<XFile> selectedMedia = await _picker.pickMultipleMedia(
+        imageQuality: 100,
+        requestFullMetadata: true,
+      );
+      
+      if (selectedMedia.isEmpty || !mounted) {
+        return;
+      }
+      
+      final List<File> selectedFiles = [];
+      final List<bool> isImageList = [];
+      
+      // Processa ogni media selezionato, ma tieni SOLO le immagini
+      for (final media in selectedMedia) {
+        final file = File(media.path);
+        // Determina se è un'immagine basandosi sull'estensione
+        final extension = media.path.toLowerCase();
+        final isImage = extension.endsWith('.jpg') || 
+                        extension.endsWith('.jpeg') || 
+                        extension.endsWith('.png') || 
+                        extension.endsWith('.gif') ||
+                        extension.endsWith('.webp') ||
+                        extension.endsWith('.bmp') ||
+                        extension.endsWith('.heic') ||
+                        extension.endsWith('.heif');
+        
+        if (isImage) {
+          // Limita il numero di foto totali a 10
+          if (currentCount + selectedFiles.length >= maxAllowed) {
+            break; // Fermati se abbiamo raggiunto il limite
+          }
+          selectedFiles.add(file);
+          isImageList.add(true);
+        }
+      }
+
+      // Se l'utente ha selezionato solo video o nessuna immagine, mostra un messaggio e interrompi
+      if (selectedFiles.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('For multiple media, only images are allowed. Please select photos.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Se abbiamo selezionato più foto di quelle consentite, mostra un messaggio e limita
+      final int totalAfterAdd = currentCount + selectedFiles.length;
+      if (totalAfterAdd > maxAllowed) {
+        final int added = maxAllowed - currentCount;
+        final int skipped = selectedFiles.length - added;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Added $added image${added > 1 ? 's' : ''}. Maximum $maxAllowed images allowed. ${skipped > 0 ? '$skipped image${skipped > 1 ? 's' : ''} skipped.' : ''}'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        // Limita le liste ai file effettivamente aggiunti
+        if (selectedFiles.length > added) {
+          selectedFiles.removeRange(added, selectedFiles.length);
+          isImageList.removeRange(added, isImageList.length);
+        }
+      }
+      
+      // Anche quando si sostituisce completamente (append = false), limita a 10 foto
+      if (!append && selectedFiles.length > maxAllowed) {
+        final int skipped = selectedFiles.length - maxAllowed;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Maximum $maxAllowed images allowed for carousel. ${skipped > 0 ? '$skipped image${skipped > 1 ? 's' : ''} skipped.' : ''}'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        // Limita le liste a massimo 10 foto
+        selectedFiles.removeRange(maxAllowed, selectedFiles.length);
+        isImageList.removeRange(maxAllowed, isImageList.length);
+      }
+      
+      if (selectedFiles.isNotEmpty && mounted) {
+        setState(() {
+          if (append && _videoFiles.isNotEmpty) {
+            // Aggiungi i nuovi media alla lista esistente (limitato al massimo consentito)
+            _videoFiles.addAll(selectedFiles);
+            _isImageFiles.addAll(isImageList);
+            
+            // Aggiorna il media attivo se necessario
+            if (_currentCarouselIndex < _videoFiles.length) {
+              _videoFile = _videoFiles[_currentCarouselIndex];
+              _isImageFile = _isImageFiles[_currentCarouselIndex];
+            }
+            
+            // Se non c'era un carosello prima, crealo ora
+            if (_videoFiles.length > 1 && _carouselController == null) {
+              _carouselController = PageController(initialPage: _currentCarouselIndex);
+            }
+            
+            // Rimuovi automaticamente tutti gli account non Instagram quando ci sono più media
+            final nonInstagramPlatforms = _selectedAccounts.keys.where((platform) => platform != 'Instagram').toList();
+            for (final platform in nonInstagramPlatforms) {
+              _selectedAccounts.remove(platform);
+            }
+          } else {
+            // Sostituisci i media esistenti (comportamento originale)
+            _videoFiles = selectedFiles;
+            _isImageFiles = isImageList;
+            _currentCarouselIndex = 0;
+            
+            // Media attivo iniziale: il primo della lista
+            _videoFile = _videoFiles[0];
+            _isImageFile = _isImageFiles[0];
+            
+            // Inizializza il carosello se ci sono più file
+            if (_videoFiles.length > 1) {
+              _carouselController?.dispose();
+              _carouselController = PageController(initialPage: 0);
+              
+              // Rimuovi automaticamente tutti gli account non Instagram quando ci sono più media
+              final nonInstagramPlatforms = _selectedAccounts.keys.where((platform) => platform != 'Instagram').toList();
+              for (final platform in nonInstagramPlatforms) {
+                _selectedAccounts.remove(platform);
+              }
+            } else {
+              _carouselController?.dispose();
+              _carouselController = null;
+            }
+          }
+          
+          _showCheckmark = true;
+        });
+        
+        // Inizializza il video player per il media corrente
+        if (append && _videoFiles.isNotEmpty) {
+          // Quando si aggiungono media, usa il media corrente
+          final currentIndex = _currentCarouselIndex < _videoFiles.length 
+              ? _currentCarouselIndex 
+              : _videoFiles.length - 1;
+          if (currentIndex < _isImageFiles.length && !_isImageFiles[currentIndex]) {
+            // Ferma e dispone il video player precedente se esiste
+            if (_videoPlayerController != null) {
+              _videoPlayerController!.pause();
+              _videoPlayerController!.dispose();
+              _videoPlayerController = null;
+              _isVideoInitialized = false;
+            }
+            _initializeVideoPlayer(_videoFiles[currentIndex]);
+          } else if (currentIndex < _isImageFiles.length && _isImageFiles[currentIndex]) {
+            // Se il media corrente è un'immagine, assicuriamoci di non avere un controller video attivo
+            if (_videoPlayerController != null) {
+              _videoPlayerController!.pause();
+              _videoPlayerController!.dispose();
+              _videoPlayerController = null;
+              _isVideoInitialized = false;
+            }
+          }
+        } else {
+          // Comportamento originale: inizializza per il primo media
+          if (!_isImageFiles[0]) {
+            _initializeVideoPlayer(_videoFiles[0]);
+          } else {
+            // Se il primo è un'immagine, assicuriamoci di non avere un controller video attivo
+            if (_videoPlayerController != null) {
+              _videoPlayerController!.pause();
+              _videoPlayerController!.dispose();
+              _videoPlayerController = null;
+              _isVideoInitialized = false;
+            }
+          }
+        }
+        
+        // Vai al prossimo step solo se non stiamo aggiungendo media
+        if (!append) {
+          _goToNextStep();
+        }
+      }
+    } catch (e) {
+      // Se pickMultipleMedia non è supportato o fallisce, mostra un messaggio
+      print('Error picking multiple media: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting media. Please try again.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -2940,6 +4525,22 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
 
   // New method to open the video editor and go to next step after editing
   Future<void> _openVideoEditor(File videoFile) async {
+    // Salva l'indice corrente se ci sono più video
+    final int? currentIndex = _videoFiles.isNotEmpty ? _currentCarouselIndex : null;
+    
+    // Ferma e dispone il controller video corrente per liberare memoria
+    if (_videoPlayerController != null) {
+      if (_videoPlayerController!.value.isPlaying) {
+        _videoPlayerController!.pause();
+      }
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+      _isVideoInitialized = false;
+    }
+    
+    // Ferma il timer di aggiornamento posizione
+    _positionUpdateTimer?.cancel();
+    
     // Navigate to the VideoEditorPage
     final editedFile = await Navigator.push<File>(
       context,
@@ -2949,17 +4550,40 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     );
     
     // If user edited and saved the video, update the file
-    if (editedFile != null) {
+    if (editedFile != null && mounted) {
       setState(() {
-        _videoFile = editedFile;
+        // Se ci sono più video selezionati, aggiorna il file nella lista
+        if (_videoFiles.isNotEmpty && currentIndex != null && currentIndex < _videoFiles.length) {
+          _videoFiles[currentIndex] = editedFile;
+          // Aggiorna anche il file attivo se è quello modificato
+          if (_currentCarouselIndex == currentIndex) {
+            _videoFile = editedFile;
+          }
+        } else {
+          // Se c'è un solo video, aggiorna direttamente
+          _videoFile = editedFile;
+        }
       });
+      
+      // Re-inizializza il video player solo se il video modificato è quello attualmente visualizzato
+      if (_videoFiles.isEmpty || (currentIndex != null && _currentCarouselIndex == currentIndex)) {
+        if (!_isImageFile) {
+          _initializeVideoPlayer(editedFile);
+        }
+      } else if (_videoFiles.isNotEmpty && _currentCarouselIndex < _isImageFiles.length && !_isImageFiles[_currentCarouselIndex]) {
+        // Se il video corrente è diverso da quello modificato, re-inizializza quello corrente
+        _initializeVideoPlayer(_videoFiles[_currentCarouselIndex]);
+      }
+    } else if (mounted) {
+      // Se l'utente ha annullato l'editing, re-inizializza il video corrente
+      if (_videoFiles.isNotEmpty && _currentCarouselIndex < _isImageFiles.length && !_isImageFiles[_currentCarouselIndex]) {
+        // Modalità multi-video: re-inizializza il video corrente nel carosello
+        _initializeVideoPlayer(_videoFiles[_currentCarouselIndex]);
+      } else if (_videoFiles.isEmpty && !_isImageFile && _videoFile != null) {
+        // Modalità singolo video: re-inizializza il video singolo
+        _initializeVideoPlayer(_videoFile!);
+      }
     }
-    
-    // Initialize the player with the new file
-    _initializeVideoPlayer(_videoFile!);
-    
-    // Go to step 2 after video editing
-    _goToNextStep();
   }
 
   // Mostra opzioni di modifica video
@@ -3098,7 +4722,19 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
 
     if (_selectedAccounts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one account before proceeding')),
+        SnackBar(
+          content: Text(
+            'Please select at least one account',
+            style: TextStyle(fontSize: 14, color: Colors.black),
+            textAlign: TextAlign.center,
+          ),
+          backgroundColor: Colors.white,
+          duration: Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          margin: EdgeInsets.all(16),
+          elevation: 2,
+        ),
       );
       return;
     }
@@ -3165,6 +4801,32 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       // Se _scheduledDateTime è già impostato (provenendo da scheduled_posts_page),
       // salta la selezione della data e dell'ora e passa direttamente alla pagina di conferma
       if (_scheduledDateTime != null) {
+        // Verifica che la data selezionata sia almeno 20 minuti nel futuro
+        final now = DateTime.now();
+        if (_scheduledDateTime!.isBefore(now.add(const Duration(minutes: 20)))) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Please select a date and time at least 20 minutes in the future',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              backgroundColor: Colors.white,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              margin: EdgeInsets.all(16),
+              duration: Duration(seconds: 3),
+              elevation: 4,
+            ),
+          );
+          return;
+        }
+        
         // Passa direttamente alla pagina di conferma della programmazione
         _stopVideoBeforeNavigation();
         
@@ -3172,7 +4834,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           context,
           MaterialPageRoute(
             builder: (context) => SchedulePostPage(
-              videoFile: _videoFile!,
+              // Passa videoFiles se disponibile, altrimenti videoFile per retrocompatibilità
+              videoFiles: _videoFiles.isNotEmpty ? _videoFiles : null,
+              isImageFiles: _videoFiles.isNotEmpty ? _isImageFiles : null,
+              videoFile: _videoFiles.isNotEmpty ? null : _videoFile,
               title: _titleController.text,
               description: _descriptionController.text,
               selectedAccounts: _selectedAccounts,
@@ -3184,10 +4849,11 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                 });
               },
               platformDescriptions: _buildPlatformDescriptions(),
-              isImageFile: _isImageFile, // Aggiungo il parametro mancante
+              isImageFile: _videoFiles.isNotEmpty ? _isImageFiles.isNotEmpty ? _isImageFiles[0] : false : _isImageFile,
               isPremium: _isPremium, // Passa lo stato premium
               draftId: widget.draftId, // Passa draftId
               youtubeThumbnailFile: _youtubeThumbnailFile, // Passa la thumbnail YouTube
+              youtubeOptions: _youtubeOptions, // Passa le opzioni YouTube
             ),
           ),
         );
@@ -3238,10 +4904,21 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       );
 
       if (picked != null) {
+        // Determine initial time - if selected date is today, set it to 21 minutes from now
+        TimeOfDay initialTime;
+        final today = DateTime(now.year, now.month, now.day);
+        final selectedDay = DateTime(picked.year, picked.month, picked.day);
+        if (selectedDay == today) {
+          final futureTime = now.add(const Duration(minutes: 21));
+          initialTime = TimeOfDay(hour: futureTime.hour, minute: futureTime.minute);
+        } else {
+          initialTime = TimeOfDay.fromDateTime(_scheduledDateTime ?? now);
+        }
+        
         // Show time picker with custom theme
         final TimeOfDay? time = await showTimePicker(
           context: context,
-          initialTime: TimeOfDay.fromDateTime(_scheduledDateTime ?? now),
+          initialTime: initialTime,
           builder: (context, child) {
             return Theme(
               data: Theme.of(context).copyWith(
@@ -3288,6 +4965,32 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             time.minute,
           );
           
+          // Verifica che la data selezionata sia almeno 20 minuti nel futuro
+          final now = DateTime.now();
+          if (scheduledDateTime.isBefore(now.add(const Duration(minutes: 20)))) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Please select a date and time at least 20 minutes in the future',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                backgroundColor: Colors.white,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                margin: EdgeInsets.all(16),
+                duration: Duration(seconds: 3),
+                elevation: 4,
+              ),
+            );
+            return;
+          }
+          
           // Navigate to the new SchedulePostPage
           // Stop video before navigation to prevent memory issues
           _stopVideoBeforeNavigation();
@@ -3296,7 +4999,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             context,
             MaterialPageRoute(
               builder: (context) => SchedulePostPage(
-                videoFile: _videoFile!,
+                // Passa videoFiles se disponibile, altrimenti videoFile per retrocompatibilità
+                videoFiles: _videoFiles.isNotEmpty ? _videoFiles : null,
+                isImageFiles: _videoFiles.isNotEmpty ? _isImageFiles : null,
+                videoFile: _videoFiles.isNotEmpty ? null : _videoFile,
                 title: _titleController.text,
                 description: _descriptionController.text,
                 selectedAccounts: _selectedAccounts,
@@ -3309,7 +5015,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   });
                 },
                 platformDescriptions: _buildPlatformDescriptions(),
-                isImageFile: _isImageFile, // Aggiungo il parametro mancante
+                isImageFile: _videoFiles.isNotEmpty ? _isImageFiles.isNotEmpty ? _isImageFiles[0] : false : _isImageFile,
                 isPremium: _isPremium, // Passa lo stato premium
                 draftId: widget.draftId, // Passa draftId
                 youtubeThumbnailFile: _youtubeThumbnailFile, // Passa la thumbnail YouTube
@@ -3342,18 +5048,22 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         context,
         MaterialPageRoute(
           builder: (context) => UploadConfirmationPage(
-            videoFile: _videoFile!,
+            // Passa videoFiles se disponibile, altrimenti videoFile per retrocompatibilità
+            videoFiles: _videoFiles.isNotEmpty ? _videoFiles : null,
+            isImageFiles: _videoFiles.isNotEmpty ? _isImageFiles : null,
+            videoFile: _videoFiles.isNotEmpty ? null : _videoFile,
             title: _titleController.text,
             description: _getDescriptionForConfirmation(),
             selectedAccounts: _selectedAccounts,
             socialAccounts: _socialAccounts,
             onConfirm: () {},
             isDraft: false,
-            isImageFile: _isImageFile,
+            isImageFile: _videoFiles.isNotEmpty ? _isImageFiles.isNotEmpty ? _isImageFiles[0] : false : _isImageFile,
             platformDescriptions: _buildPlatformDescriptions(),
             draftId: widget.draftId, // Pass the draft ID
             youtubeThumbnailFile: _youtubeThumbnailFile, // Passa la thumbnail YouTube
             tiktokOptions: _tiktokOptions, // Passa le opzioni TikTok
+            youtubeOptions: _youtubeOptions, // Passa le opzioni YouTube
           ),
         ),
       );
@@ -3595,19 +5305,23 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           context,
           MaterialPageRoute(
             builder: (context) => UploadConfirmationPage(
-              videoFile: _videoFile!,
+              // Passa videoFiles se disponibile, altrimenti videoFile per retrocompatibilità
+              videoFiles: _videoFiles.isNotEmpty ? _videoFiles : null,
+              isImageFiles: _videoFiles.isNotEmpty ? _isImageFiles : null,
+              videoFile: _videoFiles.isNotEmpty ? null : _videoFile,
               title: _titleController.text,
               description: _getDescriptionForConfirmation(),
               selectedAccounts: _selectedAccounts,
               socialAccounts: _socialAccounts,
               onConfirm: () {},
               isDraft: false,
-              isImageFile: _isImageFile,
+              isImageFile: _videoFiles.isNotEmpty ? _isImageFiles.isNotEmpty ? _isImageFiles[0] : false : _isImageFile,
               cloudflareUrl: cloudflareUrl, // Passa l'URL di Cloudflare
               platformDescriptions: _buildPlatformDescriptions(),
               draftId: widget.draftId, // Pass the draft ID
               youtubeThumbnailFile: _youtubeThumbnailFile, // Passa la thumbnail YouTube
               tiktokOptions: _tiktokOptions, // Passa le opzioni TikTok
+              youtubeOptions: _youtubeOptions, // Passa le opzioni YouTube
             ),
           ),
         );
@@ -4438,19 +6152,35 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
         throw Exception('Failed to get access token');
       }
 
-      // Prepare video metadata
+      // Prepare video metadata with user-selected options
       final videoTitle = _titleController.text.isNotEmpty ? _titleController.text : _videoFile!.path.split('/').last;
+      
+      // Get YouTube options for this account, with defaults
+      final youtubeOptions = _youtubeOptions[accountId] ?? {
+        'categoryId': '22',
+        'privacyStatus': 'public',
+        'license': 'youtube',
+        'notifySubscribers': true,
+        'embeddable': true,
+        'madeForKids': false,
+      };
+      
       final videoMetadata = {
         'snippet': {
           'title': videoTitle,
           'description': _descriptionController.text,
-          'categoryId': '22', // People & Blogs category
+          'categoryId': youtubeOptions['categoryId'] ?? '22',
         },
         'status': {
-          'privacyStatus': 'public',
-          'madeForKids': false,
+          'privacyStatus': youtubeOptions['privacyStatus'] ?? 'public',
+          'license': youtubeOptions['license'] ?? 'youtube',
+          'embeddable': youtubeOptions['embeddable'] ?? true,
+          'madeForKids': youtubeOptions['madeForKids'] ?? false,
         }
       };
+
+      // Get notifySubscribers parameter
+      final notifySubscribers = youtubeOptions['notifySubscribers'] ?? true;
 
       // First, upload the video
       final uploadResponse = await http.post(
@@ -4471,9 +6201,10 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       final uploadResponseData = json.decode(uploadResponse.body);
       final videoId = uploadResponseData['id'];
 
-      // Then, update the video metadata
+      // Then, update the video metadata with notifySubscribers parameter
+      final metadataUri = Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status${notifySubscribers ? '&notifySubscribers=true' : ''}');
       final metadataResponse = await http.put(
-        Uri.parse('https://www.googleapis.com/youtube/v3/videos?part=snippet,status'),
+        metadataUri,
         headers: {
           'Authorization': 'Bearer ${googleAuth.accessToken}',
           'Content-Type': 'application/json',
@@ -5002,7 +6733,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   }
 
   Future<void> _saveAsDraft() async {
-    if (_videoFile == null) {
+    // Permetti il salvataggio anche in modalità multi-media (carosello)
+    if (_videoFile == null && _videoFiles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a video first')),
       );
@@ -5011,7 +6743,19 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
 
     if (_selectedAccounts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one account')),
+        SnackBar(
+          content: Text(
+            'Please select at least one account',
+            style: TextStyle(fontSize: 14, color: Colors.black),
+            textAlign: TextAlign.center,
+          ),
+          backgroundColor: Colors.white,
+          duration: Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          margin: EdgeInsets.all(16),
+          elevation: 2,
+        ),
       );
       return;
     }
@@ -5035,21 +6779,64 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
-        // Upload to Cloudflare - always upload both videos and images
-        String? cloudflareVideoUrl = await _uploadToCloudflare(
-          _videoFile!, 
-          isImage: _isImageFile
-        );
-        
-        // Generate thumbnail only if it's a video file
+        // Determina se siamo in modalità multi-media (carosello)
+        final bool hasMultipleMedia = _videoFiles.length > 1;
+
+        // Lista di URL Cloudflare per tutti i media (carosello)
+        List<String> cloudflareUrls = [];
+
+        // File principale (primo media) e flag immagine per logica comune
+        final File primaryFile = _videoFiles.isNotEmpty ? _videoFiles.first : _videoFile!;
+        final bool primaryIsImage = _videoFiles.isNotEmpty
+            ? (_isImageFiles.isNotEmpty ? _isImageFiles.first : _isImageFile)
+            : _isImageFile;
+
+        // Upload su Cloudflare:
+        // - se ci sono più media, carica TUTTI i media e raccogli gli URL
+        // - altrimenti, carica solo il file singolo come prima
+        String? cloudflareVideoUrl;
+        if (hasMultipleMedia) {
+          for (int i = 0; i < _videoFiles.length; i++) {
+            final File file = _videoFiles[i];
+            final bool isImage =
+                i < _isImageFiles.length ? _isImageFiles[i] : _isImageFile;
+
+            final url = await _uploadToCloudflare(
+              file,
+              isImage: isImage,
+            );
+
+            if (url != null) {
+              cloudflareUrls.add(url);
+              if (i == 0) {
+                // Mantieni retrocompatibilità usando il primo URL come cloudflare_url principale
+                cloudflareVideoUrl = url;
+              }
+            }
+          }
+        } else {
+          cloudflareVideoUrl = await _uploadToCloudflare(
+            primaryFile,
+            isImage: primaryIsImage,
+          );
+          if (cloudflareVideoUrl != null) {
+            cloudflareUrls.add(cloudflareVideoUrl);
+          }
+        }
+
+        // Generate thumbnail solo per il PRIMO media (come richiesto)
         String? thumbnailPath;
         String? thumbnailCloudflareUrl;
-        if (!_isImageFile) {
-          thumbnailPath = await _generateThumbnail(_videoFile!);
+        if (!primaryIsImage) {
+          thumbnailPath = await _generateThumbnail(primaryFile);
           if (thumbnailPath != null) {
-            // Upload thumbnail to Cloudflare
-            thumbnailCloudflareUrl = await _uploadThumbnailToCloudflare(File(thumbnailPath));
+            // Upload thumbnail del primo media su Cloudflare
+            thumbnailCloudflareUrl =
+                await _uploadThumbnailToCloudflare(File(thumbnailPath));
           }
+        } else if (cloudflareVideoUrl != null) {
+          // Se il primo media è un'immagine, possiamo riutilizzare il suo URL come thumbnail
+          thumbnailCloudflareUrl = cloudflareVideoUrl;
         }
         
         final videoRef = _database
@@ -5059,11 +6846,25 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             .child('videos')
             .push();
 
+        // Build platform-specific titles/descriptions to reuse when saving accounts
+        final platformDescriptions = _buildPlatformDescriptions();
+
         // Prepare accounts data following the same structure as schedule_confirmation.dart
         final accountsData = <String, List<Map<String, dynamic>>>{};
         for (var platform in _selectedAccounts.keys) {
           final accounts = _selectedAccounts[platform]!;
           final platformAccounts = <Map<String, dynamic>>[];
+          final normalizedPlatformKey = platform.toLowerCase();
+
+          Map<String, String>? platformDescriptionMap =
+              platformDescriptions[platform] ??
+              platformDescriptions[normalizedPlatformKey];
+
+          if (platformDescriptionMap == null && platform.isNotEmpty) {
+            final capitalizedPlatform =
+                '${platform[0].toUpperCase()}${platform.substring(1).toLowerCase()}';
+            platformDescriptionMap = platformDescriptions[capitalizedPlatform];
+          }
           
           for (var accountId in accounts) {
             final account = _socialAccounts[platform]?.firstWhere(
@@ -5072,36 +6873,83 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             );
             
             if (account != null && account.isNotEmpty) {
-              platformAccounts.add({
+              final Map<String, dynamic> accountData = {
+                'id': account['id']?.toString() ?? accountId,
                 'username': account['username'] ?? '',
                 'display_name': account['display_name'] ?? account['username'] ?? '',
                 'profile_image_url': account['profile_image_url'] ?? '',
                 'followers_count': account['followers_count']?.toString() ?? '0',
-              });
+              };
+
+              if (account.containsKey('channel_id')) {
+                accountData['channel_id'] = account['channel_id']?.toString();
+              }
+
+              // Apply platform/account specific description if available
+              String? customDescription =
+                  platformDescriptionMap != null ? platformDescriptionMap[accountId] : null;
+              if (customDescription != null && customDescription.trim().isNotEmpty) {
+                accountData['description'] = customDescription.trim();
+              }
+
+              // Ensure YouTube titles are persisted on draft save (and add others when available)
+              final String titleKey = '${accountId}_title';
+              String? customTitle =
+                  platformDescriptionMap != null ? platformDescriptionMap[titleKey] : null;
+
+              if (normalizedPlatformKey == 'youtube') {
+                String fallbackTitle = _titleController.text.trim();
+
+                if (customTitle != null && customTitle.trim().isNotEmpty) {
+                  accountData['title'] = customTitle.trim();
+                } else if (fallbackTitle.isNotEmpty) {
+                  accountData['title'] = fallbackTitle;
+                } else {
+                  accountData['title'] = '';
+                }
+              } else if (customTitle != null && customTitle.trim().isNotEmpty) {
+                accountData['title'] = customTitle.trim();
+              }
+
+              platformAccounts.add(accountData);
             }
           }
           
           if (platformAccounts.isNotEmpty) {
-            accountsData[platform.toLowerCase()] = platformAccounts;
+            accountsData[normalizedPlatformKey] = platformAccounts;
           }
         }
 
-        // Get video duration if it's a video file
+        // Get video duration solo se NON è carosello (multi-media)
         Map<String, int>? videoDuration;
-        if (!_isImageFile) {
+        if (!hasMultipleMedia && !primaryIsImage) {
           videoDuration = await _getVideoDurationForDatabase();
         }
 
-        // Copia il video in app_flutter se non già presente
+        // Copia tutti i media in app_flutter
         final appDocDir = await getApplicationDocumentsDirectory();
-        final fileName = _videoFile!.path.split('/').last;
-        final appFlutterPath = '${appDocDir.path}/$fileName';
-        File appFlutterFile = File(appFlutterPath);
-        if (_videoFile!.path != appFlutterPath) {
-          await _videoFile!.copy(appFlutterPath);
-          // Video copiato in app_flutter
+        List<String> videoPaths = [];
+        
+        if (hasMultipleMedia) {
+          // Se ci sono più media, copia tutti e crea la lista di video_paths
+          for (int i = 0; i < _videoFiles.length; i++) {
+            final File file = _videoFiles[i];
+            final fileName = file.path.split('/').last;
+            final appFlutterPath = '${appDocDir.path}/$fileName';
+            
+            if (file.path != appFlutterPath) {
+              await file.copy(appFlutterPath);
+            }
+            videoPaths.add(appFlutterPath);
+          }
         } else {
-          // Video già in app_flutter
+          // Se c'è un solo media, copia solo quello
+          final fileName = primaryFile.path.split('/').last;
+          final appFlutterPath = '${appDocDir.path}/$fileName';
+          if (primaryFile.path != appFlutterPath) {
+            await primaryFile.copy(appFlutterPath);
+          }
+          videoPaths.add(appFlutterPath);
         }
 
         final videoData = {
@@ -5110,13 +6958,20 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           'platforms': _selectedAccounts.keys.toList(),
           'status': 'draft', // Always save as draft when using _saveAsDraft
           'timestamp': DateTime.now().millisecondsSinceEpoch,
-          'video_path': appFlutterPath, // path in app_flutter
+          'video_path': videoPaths.first, // path in app_flutter del PRIMO media (per retrocompatibilità)
+          // Lista di tutti i video_path quando ci sono più media
+          if (hasMultipleMedia && videoPaths.length > 1) 'video_paths': videoPaths,
           'cloudflare_url': cloudflareVideoUrl ?? '',
-          'thumbnail_path': thumbnailCloudflareUrl ?? (_isImageFile ? cloudflareVideoUrl : null) ?? '',
+          // Lista completa degli URL Cloudflare per tutti i media del carosello
+          // Solo se ci sono più media (carosello), altrimenti usa solo cloudflare_url
+          if (hasMultipleMedia && cloudflareUrls.isNotEmpty) 'cloudflare_urls': cloudflareUrls,
+          // Thumbnail solo per il PRIMO media
+          'thumbnail_path':
+              thumbnailCloudflareUrl ?? (primaryIsImage ? cloudflareVideoUrl : null) ?? '',
           'accounts': accountsData,
           'user_id': currentUser.uid,
           'scheduled_time': null, // No scheduled time for drafts
-          'is_image': _isImageFile, // Add flag to indicate if this is an image
+          'is_image': primaryIsImage, // Flag riferito al PRIMO media
           // Add video duration information if available
           if (videoDuration != null) ...{
             'video_duration_seconds': videoDuration['total_seconds'],
@@ -5469,7 +7324,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             child: TextField(
               controller: _promptController,
               decoration: InputDecoration(
-                  hintText: 'Di cosa parla il tuo contenuto?',
+                  hintText: 'What is your content about?',
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.all(16),
                 suffixIcon: IconButton(
@@ -5533,12 +7388,25 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Generated description with AI',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea), // Colore iniziale: blu violaceo
+                            Color(0xFF764ba2), // Colore finale: viola
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'Generated description with AI',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -5586,7 +7454,24 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     _isRefreshingAfterDraftSave = true;
     
     setState(() {
+      // Ferma e dispone il video player se presente
+      if (_videoPlayerController != null) {
+        _videoPlayerController!.pause();
+        _videoPlayerController!.dispose();
+        _videoPlayerController = null;
+        _isVideoInitialized = false;
+      }
+      
+      // Dispone il carousel controller se presente
+      _carouselController?.dispose();
+      _carouselController = null;
+      
+      // Pulisci tutti i media (singolo e multipli)
       _videoFile = null;
+      _videoFiles.clear();
+      _isImageFiles.clear();
+      _currentCarouselIndex = 0;
+      
       _thumbnailPath = null;
       _titleController.clear();
       _descriptionController.clear();
@@ -5596,6 +7481,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       _showCheckmark = false;
       _isImageFile = false;
       _isVideoFromUrl = false;
+      _isVideoLocked = false;
       _currentStep = UploadStep.selectMedia; // Reset to first step
       
       // Clear TikTok options (privacy settings, interaction settings, commercial content)
@@ -5705,7 +7591,6 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                       _buildActionItem(Icons.description, 'Clear all descriptions'),
                       _buildActionItem(Icons.people, 'Deselect all accounts'),
                       _buildActionItem(Icons.settings, 'Reset all custom settings'),
-                      _buildActionItem(Icons.video_settings, 'Clear TikTok settings'),
                       _buildActionItem(Icons.arrow_back, 'Return to step 1'),
                     ],
                   ),
@@ -5797,15 +7682,15 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   // Debounce scroll per evitare troppi setState
   void _onScrollDebounced() {
     if (_scrollDebounceTimer?.isActive ?? false) _scrollDebounceTimer!.cancel();
-    _scrollDebounceTimer = Timer(const Duration(milliseconds: 150), () { // Aumentato da 80 a 150ms
+    _scrollDebounceTimer = Timer(const Duration(milliseconds: 150), () {
       if (!mounted) return;
       final newPosition = _scrollController.position.pixels;
-      if ((newPosition - _scrollPosition).abs() > 5) { // Aumentato threshold da 2 a 5
-            setState(() {
+      if ((newPosition - _scrollPosition).abs() > 5) {
+        setState(() {
           _scrollPosition = newPosition;
-            });
-        }
-      });
+        });
+      }
+    });
   }
 
   // Inizializza il controller del video
@@ -5968,11 +7853,21 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
+    // Determina se il media corrente è un'immagine (per supportare media multipli)
+    final currentIsImage = _videoFiles.isNotEmpty 
+        ? (_currentCarouselIndex < _isImageFiles.length ? _isImageFiles[_currentCarouselIndex] : false)
+        : _isImageFile;
+    
         return Scaffold(
-       resizeToAvoidBottomInset: false,
+       resizeToAvoidBottomInset: true,
        backgroundColor: theme.brightness == Brightness.dark ? Colors.grey[900] : Colors.grey[50],
        body: SafeArea(
-        child: Stack(
+        child: GestureDetector(
+          onTap: () {
+            // Chiudi la tastiera quando si tocca fuori dal campo
+            FocusScope.of(context).unfocus();
+          },
+          child: Stack(
           children: [
             // Main content area with PageView for horizontal swiping - adjusted for top bar
             Padding(
@@ -6037,7 +7932,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
               child: _buildTopBar(),
             ),
             
-            // Floating progress indicator at top - similar to history page search bar
+            // Floating progress indicator at top
             Positioned(
               top: MediaQuery.of(context).size.height * 0.08, // 8% dell'altezza dello schermo
               left: 0,
@@ -6113,6 +8008,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
+                                color: theme.brightness == Brightness.dark ? Colors.black : null,
                               ),
                             ),
                             SizedBox(height: 4),
@@ -6127,167 +8023,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   ),
                 ),
               ),
-            
-            // Fullscreen video overlay
-            if (_isVideoFullscreen && !_isImageFile && _isVideoInitialized && _videoPlayerController != null)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _showVideoControls = !_showVideoControls;
-                    });
-                    
-                    // Reset timer for auto-hide controls
-                    _controlsHideTimer?.cancel();
-                    if (_showVideoControls) {
-                      _controlsHideTimer = Timer(Duration(seconds: 3), () {
-                        if (mounted && _isVideoFullscreen) {
-                          setState(() {
-                            _showVideoControls = false;
-                          });
-                        }
-                      });
-                    }
-                  },
-                  child: Container(
-                    color: Colors.black,
-                    child: Stack(
-                      children: [
-                        // Video player
-                        _buildVideoPlayer(_videoPlayerController!),
-                        
-                        // Fullscreen controls
-                        AnimatedOpacity(
-                          opacity: _showVideoControls ? 1.0 : 0.0,
-                          duration: Duration(milliseconds: 300),
-                          child: Stack(
-                            children: [
-                              // Semi-transparent overlay
-                              Container(
-                                width: double.infinity,
-                                height: double.infinity,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.black.withOpacity(0.5),
-                                      Colors.transparent,
-                                      Colors.transparent,
-                                      Colors.black.withOpacity(0.5),
-                                    ],
-                                    stops: [0.0, 0.2, 0.8, 1.0],
-                                  ),
-                                ),
-                              ),
-                              
-                              // Exit fullscreen button
-                              Positioned(
-                                top: 20,
-                                left: 20,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.6),
-                                    borderRadius: BorderRadius.circular(30),
-                                  ),
-                                  child: IconButton(
-                                    icon: Icon(Icons.fullscreen_exit, color: Colors.white),
-                                    onPressed: _toggleFullScreen,
-                                  ),
-                                ),
-                              ),
-                              
-                              // Play/Pause button at center
-                              Center(
-                                child: GestureDetector(
-                                  onTap: _toggleVideoPlayback,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.5),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(
-                                      _videoPlayerController!.value.isPlaying 
-                                        ? Icons.pause 
-                                        : Icons.play_arrow,
-                                      color: Colors.white,
-                                      size: 48,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              
-                              // Progress bar at bottom
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: [
-                                        Colors.black.withOpacity(0.7),
-                                        Colors.transparent,
-                                      ],
-                                    ),
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatDuration(_currentPosition),
-                                            style: TextStyle(color: Colors.white, fontSize: 14),
-                                          ),
-                                          Text(
-                                            _formatDuration(_videoDuration),
-                                            style: TextStyle(color: Colors.white, fontSize: 14),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      SliderTheme(
-                                        data: SliderThemeData(
-                                          thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                                          trackHeight: 4,
-                                          activeTrackColor: theme.colorScheme.primary,
-                                          inactiveTrackColor: Colors.white.withOpacity(0.3),
-                                          thumbColor: Colors.white,
-                                        ),
-                                        child: Slider(
-                                          value: _currentPosition.inSeconds.toDouble(),
-                                          min: 0.0,
-                                          max: _videoDuration.inSeconds.toDouble() > 0 
-                                              ? _videoDuration.inSeconds.toDouble() 
-                                              : 1.0,
-                                          onChanged: (value) {
-                                            final newPosition = Duration(seconds: value.toInt());
-                                            _videoPlayerController?.seekTo(newPosition);
-                                            setState(() {
-                                              _currentPosition = newPosition;
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
+          ),
         ),
       ),
       floatingActionButton: null,
@@ -6487,15 +8224,52 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             Container(
               padding: EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDark ? Color(0xFF1E1E1E) : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                // Effetto vetro semi-trasparente opaco
+                color: isDark 
+                    ? Colors.white.withOpacity(0.15) 
+                    : Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(20),
+                // Bordo con effetto vetro più sottile
+                border: Border.all(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
+                // Ombra per effetto profondità e vetro
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
+                    color: isDark 
+                        ? Colors.black.withOpacity(0.4)
+                        : Colors.black.withOpacity(0.15),
+                    blurRadius: isDark ? 25 : 20,
+                    spreadRadius: isDark ? 1 : 0,
+                    offset: const Offset(0, 10),
+                  ),
+                  // Ombra interna per effetto vetro
+                  BoxShadow(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.1)
+                        : Colors.white.withOpacity(0.6),
+                    blurRadius: 2,
+                    spreadRadius: -2,
+                    offset: const Offset(0, 2),
                   ),
                 ],
+                // Gradiente più sottile per effetto vetro
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark 
+                      ? [
+                          Colors.white.withOpacity(0.2),
+                          Colors.white.withOpacity(0.1),
+                        ]
+                      : [
+                          Colors.white.withOpacity(0.3),
+                          Colors.white.withOpacity(0.2),
+                        ],
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -6561,7 +8335,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                         SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Supported formats: MP4, MOV, JPG, PNG',
+                            'Video: MP4, MOV • Images: JPG, PNG',
                             style: TextStyle(
                               color: theme.colorScheme.secondary,
                               fontSize: 13,
@@ -6583,42 +8357,82 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             Container(
               height: _videoFile != null ? MediaQuery.of(context).size.height * 0.75 - 50.6 : 320, // Reduced by 2cm (75.6 logical pixels)
               padding: _videoFile != null ? EdgeInsets.only(top: 16) : EdgeInsets.zero, // Add top padding when video is selected
-              child: Card(
-                elevation: 2,
-                margin: EdgeInsets.zero, // Remove margin to eliminate white space
-                shadowColor: Colors.black.withOpacity(0.1),
-                shape: RoundedRectangleBorder(
+              child: Container(
+                decoration: BoxDecoration(
+                  // Effetto vetro semi-trasparente opaco
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.15) 
+                      : Colors.white.withOpacity(0.25),
                   borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(
-                    color: theme.colorScheme.primary.withOpacity(0.15),
+                  // Bordo con effetto vetro più sottile
+                  border: Border.all(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
                     width: 1,
                   ),
-                ),
-                child: GestureDetector(
-                  onTap: _videoFile != null && !_isImageFile ? () {
-                    // Show/hide video controls on tap
-                    setState(() {
-                      _showVideoControls = !_showVideoControls;
-                    });
-                    
-                    // Hide controls automatically after 3 seconds
-                    _controlsHideTimer?.cancel();
-                    if (_showVideoControls) {
-                      _controlsHideTimer = Timer(Duration(seconds: 3), () {
-                        if (mounted && _videoPlayerController?.value.isPlaying == true) {
-                          setState(() {
-                            _showVideoControls = false;
-                          });
-                        }
-                      });
-                    }
-                  } : _pickMedia,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isDark ? Color(0xFF1E1E1E) : Colors.white,
-                      borderRadius: BorderRadius.circular(20),
+                  // Ombra per effetto profondità e vetro
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDark 
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: isDark ? 25 : 20,
+                      spreadRadius: isDark ? 1 : 0,
+                      offset: const Offset(0, 10),
                     ),
-                    child: _videoFile == null
+                    // Ombra interna per effetto vetro
+                    BoxShadow(
+                      color: isDark 
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  // Gradiente più sottile per effetto vetro
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark 
+                        ? [
+                            Colors.white.withOpacity(0.2),
+                            Colors.white.withOpacity(0.1),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.3),
+                            Colors.white.withOpacity(0.2),
+                          ],
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: GestureDetector(
+                    onTap: _videoFile != null && !_isImageFile ? () {
+                      // Show/hide video controls on tap
+                      setState(() {
+                        _showVideoControls = !_showVideoControls;
+                      });
+                      
+                      // Hide controls automatically after 3 seconds
+                      _controlsHideTimer?.cancel();
+                      if (_showVideoControls) {
+                        _controlsHideTimer = Timer(Duration(seconds: 3), () {
+                          if (mounted && _videoPlayerController?.value.isPlaying == true) {
+                            setState(() {
+                              _showVideoControls = false;
+                            });
+                          }
+                        });
+                      }
+                    } : _pickMedia,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.transparent, // Trasparente per far vedere l'effetto vetro del container padre
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    child: (_videoFile == null && _videoFiles.isEmpty)
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -6657,30 +8471,11 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.secondary.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: theme.colorScheme.secondary.withOpacity(0.2),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Text(
-                                  'Video: MP4, MOV • Images: JPG, PNG',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.secondary,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         )
                       : _buildSelectedMediaPreview(theme),
+                    ),
                   ),
                 ),
               ),
@@ -6698,22 +8493,370 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
       builder: (context, constraints) {
         double containerHeight = constraints.maxHeight * 1;
         
-
+        // Usa _videoFiles se disponibile, altrimenti usa _videoFile per compatibilità
+        final filesToShow = _videoFiles.isNotEmpty ? _videoFiles : (_videoFile != null ? [_videoFile!] : []);
+        final isImageList = _isImageFiles.isNotEmpty ? _isImageFiles : (_videoFile != null ? [_isImageFile] : <bool>[]);
+        final hasMultipleFiles = filesToShow.length > 1;
         
         return Stack(
           children: [
-            // Video preview or Image preview
-            ClipRRect(
+            // Carosello se ci sono più file, altrimenti mostra il singolo file
+            hasMultipleFiles && _carouselController != null
+              ? ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              child: _isImageFile 
-                ? Image.file(
-                    _videoFile!,
+                  child: PageView.builder(
+                    controller: _carouselController,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentCarouselIndex = index;
+                        if (index < filesToShow.length && index < isImageList.length) {
+                          final file = filesToShow[index];
+                          final isImage = isImageList[index];
+                          _videoFile = file;
+                          _isImageFile = isImage;
+                          
+                          if (!isImage) {
+                            // Inizializza il video player globale per il nuovo video
+                            _initializeVideoPlayer(file);
+                          } else {
+                            // Se passiamo a un'immagine, rilascia il controller video
+                            if (_videoPlayerController != null) {
+                              _videoPlayerController!.pause();
+                              _videoPlayerController!.dispose();
+                              _videoPlayerController = null;
+                              _isVideoInitialized = false;
+                            }
+                          }
+                        }
+                      });
+                    },
+                    itemCount: filesToShow.length,
+                    itemBuilder: (context, index) {
+                      final bool isImage = index < isImageList.length ? isImageList[index] : true;
+                      return _buildSingleMediaPreview(
+                        filesToShow[index],
+                        isImage,
+                        index,
+                        containerHeight,
+                        theme,
+                      );
+                    },
+                  ),
+                )
+              : filesToShow.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: _buildSingleMediaPreview(
+                      filesToShow[0],
+                      isImageList.isNotEmpty ? isImageList[0] : _isImageFile,
+                      0,
+                      containerHeight,
+                      theme,
+                    ),
+                  )
+                : SizedBox(),
+            
+            // Indicatore del carosello (dots) se ci sono più file
+            if (hasMultipleFiles)
+              Positioned(
+                bottom: 16,
+                left: 0,
+                right: 0,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    filesToShow.length,
+                    (index) => Container(
+                      margin: EdgeInsets.symmetric(horizontal: 4),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _currentCarouselIndex == index
+                            ? Colors.white
+                            : Colors.white.withOpacity(0.4),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            
+            // Badge conteggio media in alto a sinistra
+            if (filesToShow.length > 1)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_currentCarouselIndex + 1}/${filesToShow.length}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            
+            // Control buttons
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Row(
+                children: [
+                  // Show URL indicator if video was loaded from URL
+                  if (_isVideoFromUrl)
+                    Container(
+                      margin: EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.link,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'URL',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // Video editor button
+                  if (filesToShow.isNotEmpty && !isImageList[_currentCarouselIndex])
+                    InkWell(
+                      onTap: () async {
+                        if (filesToShow.isNotEmpty) {
+                          await _openVideoEditor(filesToShow[_currentCarouselIndex]);
+                        }
+                      },
+                      child: Container(
+                        margin: EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.edit,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  // Add media button - solo se il media corrente è un'immagine (non video) e non si è raggiunto il limite di 10
+                  if (filesToShow.isNotEmpty && 
+                      filesToShow.length < 10 &&
+                      (isImageList.isNotEmpty 
+                          ? isImageList[_currentCarouselIndex] 
+                          : _isImageFile))
+                    InkWell(
+                      onTap: () async {
+                        await _pickMultipleMedia(append: true);
+                      },
+                      child: Container(
+                        margin: EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.add_photo_alternate,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        final bool hasMultipleMedia = _videoFiles.length > 1;
+                        
+                        if (hasMultipleMedia) {
+                          // Modalità carosello: rimuovi solo il media corrente
+                          final int indexToRemove = _currentCarouselIndex;
+                          
+                          // Ferma e dispone il video player corrente
+                          if (_videoPlayerController != null) {
+                            _videoPlayerController!.pause();
+                            _videoPlayerController!.dispose();
+                            _videoPlayerController = null;
+                            _isVideoInitialized = false;
+                          }
+                          
+                          // Determina il nuovo indice prima di rimuovere
+                          int newIndex;
+                          final int totalMedia = _videoFiles.length;
+                          
+                          if (indexToRemove == totalMedia - 1) {
+                            // Se stai rimuovendo l'ultimo media, vai al precedente
+                            newIndex = totalMedia - 2;
+                          } else {
+                            // Altrimenti, resta sullo stesso indice (il media successivo si sposterà qui)
+                            newIndex = indexToRemove;
+                          }
+                          
+                          // Rimuovi il media corrente
+                          _videoFiles.removeAt(indexToRemove);
+                          _isImageFiles.removeAt(indexToRemove);
+                          
+                          // Gestisci l'indice del carosello
+                          if (_videoFiles.isEmpty) {
+                            // Se non ci sono più media, pulisci tutto
+                            _carouselController?.dispose();
+                            _carouselController = null;
+                            _videoFile = null;
+                            _showCheckmark = false;
+                            _isImageFile = false;
+                            _isVideoFromUrl = false;
+                            _isVideoLocked = false;
+                            _currentCarouselIndex = 0;
+                          } else if (_videoFiles.length == 1) {
+                            // Se rimane un solo media, passa alla modalità singolo file
+                            _carouselController?.dispose();
+                            _carouselController = null;
+                            _videoFile = _videoFiles[0];
+                            _isImageFile = _isImageFiles[0];
+                            _currentCarouselIndex = 0;
+                            
+                            // Inizializza il video player se è un video
+                            if (!_isImageFile) {
+                              Future.delayed(const Duration(milliseconds: 300), () {
+                                if (mounted) {
+                                  _initializeVideoPlayer(_videoFile!);
+                                }
+                              });
+                            }
+                          } else {
+                            // Aggiorna l'indice del carosello
+                            _currentCarouselIndex = newIndex;
+                            
+                            // Aggiorna il file attivo
+                            _videoFile = _videoFiles[_currentCarouselIndex];
+                            _isImageFile = _isImageFiles[_currentCarouselIndex];
+                            
+                            // Ricrea il PageController per aggiornare il carosello
+                            _carouselController?.dispose();
+                            _carouselController = PageController(initialPage: _currentCarouselIndex);
+                            
+                            // Inizializza il video player per il nuovo media corrente se è un video
+                            if (!_isImageFile) {
+                              Future.delayed(const Duration(milliseconds: 300), () {
+                                if (mounted) {
+                                  _initializeVideoPlayer(_videoFile!);
+                                }
+                              });
+                            }
+                          }
+                        } else {
+                          // Modalità singolo file: rimuovi tutto (comportamento originale)
+                          if (_videoPlayerController != null) {
+                            _videoPlayerController!.pause();
+                            _videoPlayerController!.dispose();
+                            _videoPlayerController = null;
+                            _isVideoInitialized = false;
+                          }
+                          
+                          _carouselController?.dispose();
+                          _carouselController = null;
+                          
+                          _videoFiles.clear();
+                          _isImageFiles.clear();
+                          _videoFile = null;
+                          _showCheckmark = false;
+                          _isImageFile = false;
+                          _isVideoFromUrl = false;
+                          _isVideoLocked = false;
+                          _currentCarouselIndex = 0;
+                        }
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Costruisce il preview per un singolo file (immagine o video)
+  Widget _buildSingleMediaPreview(
+    File file,
+    bool isImage,
+    int index,
+    double containerHeight,
+    ThemeData theme,
+  ) {
+    // Immagine semplice
+    if (isImage) {
+      return Image.file(
+        file,
                     fit: BoxFit.contain,
                     width: double.infinity,
                     height: containerHeight,
-                  )
-                : _isVideoInitialized && _videoPlayerController != null
-                  ? Container(
+      );
+    }
+
+    // Video: lo riproduciamo solo per l'elemento attivo del carosello,
+    // gli altri mostrano un placeholder con icona play
+    final bool isCurrent = index == _currentCarouselIndex;
+
+    if (!isCurrent || _videoPlayerController == null) {
+      return Container(
+        width: double.infinity,
+        height: containerHeight,
+        color: const Color(0xFF1E1E1E),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.play_circle_fill, color: Colors.white, size: 48),
+              const SizedBox(height: 8),
+              Text(
+                'Swipe to preview',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Video corrente con controller globale
+    if (_isVideoInitialized && _videoPlayerController != null) {
+      final controller = _videoPlayerController!;
+      return Container(
                       width: double.infinity,
                       height: containerHeight,
                       color: const Color(0xFF1E1E1E),
@@ -6722,15 +8865,15 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            _buildVideoPlayer(_videoPlayerController!),
+              _buildVideoPlayer(controller),
                             
-                            // Video controls overlay
+              // Overlay controlli
                             AnimatedOpacity(
                               opacity: _showVideoControls ? 1.0 : 0.0,
                               duration: Duration(milliseconds: 300),
                               child: Stack(
                                 children: [
-                                  // Semi-transparent overlay
+                    // Overlay semi-trasparente
                                   Container(
                                     width: double.infinity,
                                     height: double.infinity,
@@ -6749,7 +8892,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                     ),
                                   ),
                                   
-                                  // Play/Pause button at center
+                    // Pulsante play/pause centrale
                                   Center(
                                     child: GestureDetector(
                               onTap: _toggleVideoPlayback,
@@ -6760,7 +8903,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
-                                  _videoPlayerController!.value.isPlaying 
+                            controller.value.isPlaying 
                                     ? Icons.pause 
                                     : Icons.play_arrow,
                                   color: Colors.white,
@@ -6770,7 +8913,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                     ),
                                   ),
                                   
-                                  // Progress bar at bottom
+                    // Barra di progresso in basso
                                   Positioned(
                                     left: 0,
                                     right: 0,
@@ -6820,7 +8963,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                                   : 1.0,
                                               onChanged: (value) {
                                                 final newPosition = Duration(seconds: value.toInt());
-                                                _videoPlayerController?.seekTo(newPosition);
+                                  controller.seekTo(newPosition);
                                                 setState(() {
                                                   _currentPosition = newPosition;
                                                 });
@@ -6837,8 +8980,11 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                           ],
                         ),
                       ),
-                    )
-                  : Center(
+      );
+    }
+
+    // Stato di caricamento
+    return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -6852,119 +8998,6 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                           ),
                         ],
                       ),
-                    ),
-            ),
-              
-            // Control buttons
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Row(
-                children: [
-                  // Show URL indicator if video was loaded from URL
-                  if (_isVideoFromUrl)
-                    Container(
-                      margin: EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.link,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          SizedBox(width: 4),
-                          Text(
-                            'URL',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  // Fullscreen button for videos
-                  if (!_isImageFile && _videoFile != null && _isVideoInitialized)
-                    InkWell(
-                      onTap: _toggleFullScreen,
-                      child: Container(
-                        margin: EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          _isVideoFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  
-                  // Video editor button
-                  if (!_isImageFile && _videoFile != null)
-                    InkWell(
-                      onTap: _navigateToVideoEditor,
-                      child: Container(
-                        margin: EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.edit,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  InkWell(
-                    onTap: () {
-                      // Clear video selection
-                      setState(() {
-                        // Dispose the video controller
-                        if (_videoPlayerController != null) {
-                          _videoPlayerController!.pause();
-                          _videoPlayerController!.dispose();
-                          _videoPlayerController = null;
-                          _isVideoInitialized = false;
-                        }
-                        _videoFile = null;
-                        _showCheckmark = false;
-                        _isImageFile = false;
-                        _isVideoFromUrl = false;
-                        _isVideoFullscreen = false;
-                        _isVideoLocked = false;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.close,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -6975,21 +9008,59 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Title and description header
           Container(
             padding: EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: isDark ? Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: BorderRadius.circular(16),
+              // Effetto vetro semi-trasparente opaco
+              color: isDark 
+                  ? Colors.white.withOpacity(0.15) 
+                  : Colors.white.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(20),
+              // Bordo con effetto vetro più sottile
+              border: Border.all(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.2)
+                    : Colors.white.withOpacity(0.4),
+                width: 1,
+              ),
+              // Ombra per effetto profondità e vetro
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
+                  color: isDark 
+                      ? Colors.black.withOpacity(0.4)
+                      : Colors.black.withOpacity(0.15),
+                  blurRadius: isDark ? 25 : 20,
+                  spreadRadius: isDark ? 1 : 0,
+                  offset: const Offset(0, 10),
+                ),
+                // Ombra interna per effetto vetro
+                BoxShadow(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.1)
+                      : Colors.white.withOpacity(0.6),
+                  blurRadius: 2,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 2),
                 ),
               ],
+              // Gradiente più sottile per effetto vetro
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark 
+                    ? [
+                        Colors.white.withOpacity(0.2),
+                        Colors.white.withOpacity(0.1),
+                      ]
+                    : [
+                        Colors.white.withOpacity(0.3),
+                        Colors.white.withOpacity(0.2),
+                      ],
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -7076,19 +9147,52 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           Container(
             padding: EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: isDark ? Colors.grey[900] : Colors.white,
-              borderRadius: BorderRadius.circular(16),
+              // Effetto vetro semi-trasparente opaco
+              color: isDark 
+                  ? Colors.white.withOpacity(0.15) 
+                  : Colors.white.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(20),
+              // Bordo con effetto vetro più sottile
               border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(0.15),
+                color: isDark 
+                    ? Colors.white.withOpacity(0.2)
+                    : Colors.white.withOpacity(0.4),
                 width: 1,
               ),
+              // Ombra per effetto profondità e vetro
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
+                  color: isDark 
+                      ? Colors.black.withOpacity(0.4)
+                      : Colors.black.withOpacity(0.15),
+                  blurRadius: isDark ? 25 : 20,
+                  spreadRadius: isDark ? 1 : 0,
+                  offset: const Offset(0, 10),
+                ),
+                // Ombra interna per effetto vetro
+                BoxShadow(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.1)
+                      : Colors.white.withOpacity(0.6),
+                  blurRadius: 2,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 2),
                 ),
               ],
+              // Gradiente più sottile per effetto vetro
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark 
+                    ? [
+                        Colors.white.withOpacity(0.2),
+                        Colors.white.withOpacity(0.1),
+                      ]
+                    : [
+                        Colors.white.withOpacity(0.3),
+                        Colors.white.withOpacity(0.2),
+                      ],
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -7162,7 +9266,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           child: TextField(
             controller: _descriptionController,
             maxLines: 8, // Default large size for main description
-            textInputAction: TextInputAction.done,
+            textInputAction: TextInputAction.newline,
             decoration: InputDecoration(
               hintText: 'Describe your content in a compelling way...',
               border: InputBorder.none,
@@ -7258,12 +9362,25 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Generated description with AI',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [
+                            Color(0xFF667eea), // Colore iniziale: blu violaceo
+                            Color(0xFF764ba2), // Colore finale: viola
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180), // 135 gradi
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        'Generated description with AI',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -7326,15 +9443,52 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           Container(
             padding: EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: isDark ? Colors.grey[900] : Colors.white,
-              borderRadius: BorderRadius.circular(16),
+              // Effetto vetro semi-trasparente opaco
+              color: isDark 
+                  ? Colors.white.withOpacity(0.15) 
+                  : Colors.white.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(20),
+              // Bordo con effetto vetro più sottile
+              border: Border.all(
+                color: isDark 
+                    ? Colors.white.withOpacity(0.2)
+                    : Colors.white.withOpacity(0.4),
+                width: 1,
+              ),
+              // Ombra per effetto profondità e vetro
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
+                  color: isDark 
+                      ? Colors.black.withOpacity(0.4)
+                      : Colors.black.withOpacity(0.15),
+                  blurRadius: isDark ? 25 : 20,
+                  spreadRadius: isDark ? 1 : 0,
+                  offset: const Offset(0, 10),
+                ),
+                // Ombra interna per effetto vetro
+                BoxShadow(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.1)
+                      : Colors.white.withOpacity(0.6),
+                  blurRadius: 2,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 2),
                 ),
               ],
+              // Gradiente più sottile per effetto vetro
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark 
+                    ? [
+                        Colors.white.withOpacity(0.2),
+                        Colors.white.withOpacity(0.1),
+                      ]
+                    : [
+                        Colors.white.withOpacity(0.3),
+                        Colors.white.withOpacity(0.2),
+                      ],
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -7443,7 +9597,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                   
                     SizedBox(height: 24),
           
-          // Social accounts section (temporarily hide TikTok)
+          // Social accounts section (hide Twitter and TikTok)
           ..._socialAccounts.entries.where((entry) => entry.key != 'Twitter' && entry.key != 'TikTok').map((entry) {
             final platform = entry.key;
             final accounts = entry.value;
@@ -7463,18 +9617,55 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
               key: _platformKeys[platform],
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: isDark ? Colors.grey[900]! : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                // Effetto vetro semi-trasparente opaco
+                color: isDark 
+                    ? Colors.white.withOpacity(0.15) 
+                    : Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(20),
+                // Bordo con effetto vetro più sottile
+                border: Border.all(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
+                // Ombra per effetto profondità e vetro
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    color: isDark 
+                        ? Colors.black.withOpacity(0.4)
+                        : Colors.black.withOpacity(0.15),
+                    blurRadius: isDark ? 25 : 20,
+                    spreadRadius: isDark ? 1 : 0,
+                    offset: const Offset(0, 10),
+                  ),
+                  // Ombra interna per effetto vetro
+                  BoxShadow(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.1)
+                        : Colors.white.withOpacity(0.6),
+                    blurRadius: 2,
+                    spreadRadius: -2,
+                    offset: const Offset(0, 2),
                   ),
                 ],
+                // Gradiente più sottile per effetto vetro
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark 
+                      ? [
+                          Colors.white.withOpacity(0.2),
+                          Colors.white.withOpacity(0.1),
+                        ]
+                      : [
+                          Colors.white.withOpacity(0.3),
+                          Colors.white.withOpacity(0.2),
+                        ],
+                ),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 child: Theme(
                   data: Theme.of(context).copyWith(
                     dividerColor: Colors.transparent,
@@ -7483,8 +9674,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                     duration: Duration(milliseconds: 200),
                     curve: Curves.fastOutSlowIn,
                     decoration: BoxDecoration(
-                      color: isDark ? Color(0xFF121212) : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
+                      color: Colors.transparent, // Trasparente per far vedere l'effetto vetro del container padre
+                      borderRadius: BorderRadius.circular(20),
                     ),
                     child: ExpansionTile(
                       key: PageStorageKey<String>('expansion_${platform}_1'),
@@ -7762,6 +9953,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                         final username = (accountMap['username'] ?? accountMap['display_name'] ?? '').toString();
                                         final followersCount = (accountMap['followers_count'] ?? accountMap['follower_count'] ?? accountMap['subscriber_count'] ?? '0').toString();
                                         final displayName = (accountMap['display_name'] ?? username).toString();
+                                        final bool hasMultipleMedia = _videoFiles.length > 1;
+                                        final bool isDisabled = hasMultipleMedia && platform != 'Instagram';
 
                                         return Column(
                                           children: [
@@ -7849,13 +10042,41 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                                           minHeight: 36,
                                                         ),
                                                       ),
-                                                    Switch(
-                                                      value: isSelected,
-                                                      onChanged: (platform == 'YouTube' && _isImageFile)
-                                                          ? null
-                                                          : (value) => _toggleAccount(platform, accountId),
-                                                      activeColor: Color(0xFF667eea),
-                                                    ),
+                                                    isDisabled 
+                                                        ? GestureDetector(
+                                                            onTap: () {
+                                                              // Mostra snackbar quando si clicca sul toggle disabilitato
+                                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                                SnackBar(
+                                                                  content: Text(
+                                                                    'Only Instagram supports multi-media uploads. Please select Instagram accounts only.',
+                                                                    style: TextStyle(fontSize: 14, color: Colors.black),
+                                                                    textAlign: TextAlign.center,
+                                                                  ),
+                                                                  backgroundColor: Colors.white,
+                                                                  duration: Duration(seconds: 4),
+                                                                  behavior: SnackBarBehavior.floating,
+                                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                                  margin: EdgeInsets.all(16),
+                                                                  elevation: 2,
+                                                                ),
+                                                              );
+                                                            },
+                                                            child: Switch(
+                                                              value: isSelected,
+                                                              onChanged: null,
+                                                              activeColor: Color(0xFF667eea),
+                                                              // Render visivamente più chiaro quando disabilitato con multi-media
+                                                              activeTrackColor: Colors.grey[300],
+                                                              inactiveThumbColor: Colors.grey[400],
+                                                              inactiveTrackColor: Colors.grey[200],
+                                                            ),
+                                                          )
+                                                        : Switch(
+                                                            value: isSelected,
+                                                            onChanged: (value) => _toggleAccount(platform, accountId),
+                                                            activeColor: Color(0xFF667eea),
+                                                          ),
                                                   ],
                                                 ),
                                                 onTap: () => _navigateToSocialAccountDetails(accountMap, platform),
@@ -7883,7 +10104,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           }).toList(),
           
           // Action buttons at the bottom
-          SizedBox(height: 78), // Aumentato di 1 cm (38 pixel)
+          SizedBox(height: 40), // Ridotto di 1 cm per renderla più visibile
           _buildActionButtons(theme),
           
           // Padding finale della pagina
@@ -8439,19 +10660,58 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        // Effetto vetro semi-trasparente opaco
+        color: isDark 
+            ? Colors.white.withOpacity(0.15) 
+            : Colors.white.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(20),
+        // Bordo con effetto vetro più sottile
+        border: Border.all(
+          color: isDark 
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
+        // Ombra per effetto profondità e vetro
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+            color: isDark 
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: isDark ? 25 : 20,
+            spreadRadius: isDark ? 1 : 0,
+            offset: const Offset(0, 10),
+          ),
+          // Ombra interna per effetto vetro
+          BoxShadow(
+            color: isDark 
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, 2),
           ),
         ],
+        // Gradiente più sottile per effetto vetro
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark 
+              ? [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ]
+              : [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.2),
+                ],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // Titolo sempre visibile
           Text(
             _scheduledDateTime != null ? 'Schedule your post' : 'Ready to post?',
             style: TextStyle(
@@ -8471,6 +10731,12 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             ),
           ),
           SizedBox(height: 16),
+          
+          // Pulsanti sempre visibili
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
           
           // Only show "Upload Now" button if not coming from scheduled_posts_page
           if (_scheduledDateTime == null) ...[
@@ -8560,6 +10826,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
               ),
             ),
           ],
+            ],
+          ),
         ],
       ),
     );
@@ -8621,7 +10889,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           
           SizedBox(height: 16),
           
-          // Platform selection cards (temporarily hide TikTok)
+          // Platform selection cards (hide Twitter and TikTok)
           ..._socialAccounts.entries.where((entry) => entry.key != 'Twitter' && entry.key != 'TikTok').map((entry) {
             final platform = entry.key;
             final accounts = entry.value;
@@ -8929,6 +11197,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                     final username = (accountMap['username'] ?? accountMap['display_name'] ?? '').toString();
                                     final followersCount = (accountMap['followers_count'] ?? accountMap['follower_count'] ?? accountMap['subscriber_count'] ?? '0').toString();
                                     final displayName = (accountMap['display_name'] ?? username).toString();
+                                    final bool hasMultipleMedia = _videoFiles.length > 1;
+                                    final bool isDisabled = hasMultipleMedia && platform != 'Instagram';
                                   
                                   return Column(
                                     children: [
@@ -9016,13 +11286,41 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
                                                     minHeight: 36,
                                                   ),
                                                 ),
-                                              Switch(
-                                                value: isSelected,
-                                                onChanged: (platform == 'YouTube' && _isImageFile)
-                                                    ? null
-                                                    : (value) => _toggleAccount(platform, accountId),
-                                                activeColor: Color(0xFF667eea),
-                                              ),
+                                              isDisabled 
+                                                  ? GestureDetector(
+                                                      onTap: () {
+                                                        // Mostra snackbar quando si clicca sul toggle disabilitato
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(
+                                                            content: Text(
+                                                              'Only Instagram supports multi-media uploads. Please select Instagram accounts only.',
+                                                              style: TextStyle(fontSize: 14, color: Colors.black),
+                                                              textAlign: TextAlign.center,
+                                                            ),
+                                                            backgroundColor: Colors.white,
+                                                            duration: Duration(seconds: 4),
+                                                            behavior: SnackBarBehavior.floating,
+                                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                            margin: EdgeInsets.all(16),
+                                                            elevation: 2,
+                                                          ),
+                                                        );
+                                                      },
+                                                      child: Switch(
+                                                        value: isSelected,
+                                                        onChanged: null,
+                                                        activeColor: Color(0xFF667eea),
+                                                        // Render visivamente più chiaro quando disabilitato con multi-media
+                                                        activeTrackColor: Colors.grey[300],
+                                                        inactiveThumbColor: Colors.grey[400],
+                                                        inactiveTrackColor: Colors.grey[200],
+                                                      ),
+                                                    )
+                                                  : Switch(
+                                                      value: isSelected,
+                                                      onChanged: (value) => _toggleAccount(platform, accountId),
+                                                      activeColor: Color(0xFF667eea),
+                                                    ),
                                             ],
                                           ),
                                           onTap: () => _navigateToSocialAccountDetails(accountMap, platform),
@@ -9048,7 +11346,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           }).toList(),
           
           // Action buttons at the bottom
-          SizedBox(height: 78), // Aumentato di 1 cm (38 pixel)
+          SizedBox(height: 40), // Ridotto di 1 cm per renderla più visibile
           _buildActionButtons(theme),
           
           // Padding finale della pagina
@@ -9358,6 +11656,9 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
             .trim();
       
       onComplete(generatedText);
+      
+      // Sottrai 7 crediti per utenti non premium
+      await _subtractCreditsForAIDescription();
       } else {
         throw Exception('Failed to generate description: ${response.statusCode}');
       }
@@ -9408,22 +11709,31 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
           // Se vuota, assicurati che la chiave non esista
           descriptions[platform]!.remove(accountKey);
         }
-        // Titolo (come prima)
+        // Titolo - salva sotto accountKey per essere compatibile con upload_confirmation_page
+        String? titleToUse;
         if (_accountSpecificContent != null) {
           final configKey = '${platform}_$accountId';
-          if (_accountSpecificContent!.containsKey(configKey) && 
-              _platformTitleControllers.containsKey(platform) && 
-              _platformTitleControllers[platform]!.text.isNotEmpty) {
-            descriptions[platform]!['${accountKey}_title'] = _platformTitleControllers[platform]!.text;
-          } else if (_accountSpecificContent![configKey]?['useGlobalContent'] ?? true) {
-            // Use global title only if useGlobalContent is true
-            if (_titleController.text.isNotEmpty) {
-              descriptions[platform]!['${accountKey}_title'] = _titleController.text;
+          if (_accountSpecificContent!.containsKey(configKey)) {
+            // Controlla se c'è un titolo specifico per questo account
+            titleToUse = _accountSpecificContent![configKey]?['title'];
+            if (titleToUse == null || titleToUse.isEmpty) {
+              // Se non c'è un titolo specifico, usa quello globale se useGlobalContent è true
+              if (_accountSpecificContent![configKey]?['useGlobalContent'] ?? true) {
+                titleToUse = _titleController.text;
+              }
             }
+          } else {
+            // Se non c'è configurazione specifica, usa il titolo globale
+            titleToUse = _titleController.text;
           }
-          // If useGlobalContent is false, don't add any title
-        } else if (_titleController.text.isNotEmpty) {
-          descriptions[platform]!['${accountKey}_title'] = _titleController.text;
+        } else {
+          // Se non c'è account-specific content, usa il titolo globale
+          titleToUse = _titleController.text;
+        }
+        
+        // Salva il titolo con la chiave ${accountKey}_title per compatibilità con altre pagine
+        if (titleToUse != null && titleToUse.trim().isNotEmpty) {
+          descriptions[platform]!['${accountKey}_title'] = titleToUse;
         }
       }
     }
@@ -9456,11 +11766,22 @@ class _UploadVideoPageState extends State<UploadVideoPage> with WidgetsBindingOb
     if (_selectedAccounts.containsKey('YouTube') && _selectedAccounts['YouTube']!.isNotEmpty) {
       // For each YouTube account, check if title is provided
       for (final accountId in _selectedAccounts['YouTube']!) {
-        final titleController = _platformTitleControllers['YouTube'];
         final globalTitle = _titleController.text.trim();
         
+        // Check if there's an account-specific title or global title
+        bool hasAccountSpecificTitle = false;
+        if (_accountSpecificContent != null) {
+          final configKey = 'YouTube_$accountId';
+          if (_accountSpecificContent!.containsKey(configKey)) {
+            final accountTitle = _accountSpecificContent![configKey]?['title'];
+            if (accountTitle != null && accountTitle.trim().isNotEmpty) {
+              hasAccountSpecificTitle = true;
+            }
+          }
+        }
+        
         // Check if there's a platform-specific title or global title
-        if ((titleController == null || titleController.text.trim().isEmpty) && globalTitle.isEmpty) {
+        if (!hasAccountSpecificTitle && globalTitle.isEmpty) {
           return false;
         }
       }

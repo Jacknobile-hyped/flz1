@@ -1,16 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class ThemeProvider extends ChangeNotifier {
+class ThemeProvider extends ChangeNotifier with WidgetsBindingObserver {
+  ThemeProvider() {
+    WidgetsBinding.instance.addObserver(this);
+    final initialBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    _isDarkMode = initialBrightness == Brightness.dark;
+  }
+
   bool _isDarkMode = false;
 
   bool get isDarkMode => _isDarkMode;
 
   ThemeData get theme => _isDarkMode ? _darkTheme : _lightTheme;
 
+  void setDarkMode(bool value) {
+    if (_isDarkMode == value) return;
+    _isDarkMode = value;
+    notifyListeners();
+  }
+
   void toggleTheme() {
     _isDarkMode = !_isDarkMode;
     notifyListeners();
+  }
+
+  void syncWithSystemBrightness([Brightness? brightness]) {
+    final resolvedBrightness = brightness ?? WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    setDarkMode(resolvedBrightness == Brightness.dark);
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    syncWithSystemBrightness();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   static final ThemeData _lightTheme = ThemeData(

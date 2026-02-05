@@ -2346,18 +2346,52 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        // Effetto vetro semi-trasparente opaco
+        color: theme.brightness == Brightness.dark 
+            ? Colors.white.withOpacity(0.15) 
+            : Colors.white.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(20),
+        // Bordo con effetto vetro più sottile
+        border: Border.all(
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
+        // Ombra per effetto profondità e vetro
         boxShadow: [
           BoxShadow(
-                    color: theme.brightness == Brightness.dark 
-                        ? Colors.black.withOpacity(0.3)
-                        : Colors.black.withOpacity(0.05),
-                    spreadRadius: 1,
-            blurRadius: 10,
-                    offset: const Offset(0, 4),
+            color: theme.brightness == Brightness.dark 
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+            spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+            offset: const Offset(0, 10),
+          ),
+          // Ombra interna per effetto vetro
+          BoxShadow(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, 2),
           ),
         ],
+        // Gradiente più sottile per effetto vetro
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.brightness == Brightness.dark 
+              ? [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ]
+              : [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.2),
+                ],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2447,17 +2481,52 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
               child: Container(
                 height: 36, // Reduced height
                 decoration: BoxDecoration(
-                  color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+                  // Effetto vetro semi-trasparente opaco
+                  color: theme.brightness == Brightness.dark 
+                      ? Colors.white.withOpacity(0.15) 
+                      : Colors.white.withOpacity(0.25),
                   borderRadius: BorderRadius.circular(30),
+                  // Bordo con effetto vetro più sottile
+                  border: Border.all(
+                    color: theme.brightness == Brightness.dark 
+                        ? Colors.white.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.4),
+                    width: 1,
+                  ),
+                  // Ombra per effetto profondità e vetro
                   boxShadow: [
                     BoxShadow(
                       color: theme.brightness == Brightness.dark 
-                          ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
+                          ? Colors.black.withOpacity(0.4)
+                          : Colors.black.withOpacity(0.15),
+                      blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+                      spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+                      offset: const Offset(0, 10),
+                    ),
+                    // Ombra interna per effetto vetro
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark 
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.white.withOpacity(0.6),
+                      blurRadius: 2,
+                      spreadRadius: -2,
                       offset: const Offset(0, 2),
                     ),
                   ],
+                  // Gradiente più sottile per effetto vetro
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: theme.brightness == Brightness.dark 
+                        ? [
+                            Colors.white.withOpacity(0.2),
+                            Colors.white.withOpacity(0.1),
+                          ]
+                        : [
+                            Colors.white.withOpacity(0.3),
+                            Colors.white.withOpacity(0.2),
+                          ],
+                  ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(3),
@@ -2670,23 +2739,57 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
       ),
-      color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+      color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          // Effetto vetro semi-trasparente opaco
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.15) 
+              : Colors.white.withOpacity(0.25),
+          // Bordo con effetto vetro più sottile
+          border: Border.all(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
+          // Ombra per effetto profondità e vetro
           boxShadow: [
             BoxShadow(
               color: theme.brightness == Brightness.dark 
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
-              spreadRadius: 1,
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+              spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+              offset: const Offset(0, 10),
+            ),
+            // Ombra interna per effetto vetro
+            BoxShadow(
+              color: theme.brightness == Brightness.dark 
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.white.withOpacity(0.6),
+              blurRadius: 2,
+              spreadRadius: -2,
+              offset: const Offset(0, 2),
             ),
           ],
+          // Gradiente più sottile per effetto vetro
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark 
+                ? [
+                    Colors.white.withOpacity(0.2),
+                    Colors.white.withOpacity(0.1),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.3),
+                    Colors.white.withOpacity(0.2),
+                  ],
+          ),
       ),
       child: InkWell(
         onTap: () {
@@ -2707,7 +2810,7 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
             ),
           );
         },
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -3037,21 +3140,55 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark ? Colors.grey[850]! : Colors.white,
+        // Effetto vetro semi-trasparente opaco
+        color: theme.brightness == Brightness.dark 
+            ? Colors.white.withOpacity(0.15) 
+            : Colors.white.withOpacity(0.25),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(25),
           bottomRight: Radius.circular(25),
         ),
+        // Bordo con effetto vetro più sottile
+        border: Border.all(
+          color: theme.brightness == Brightness.dark 
+              ? Colors.white.withOpacity(0.2)
+              : Colors.white.withOpacity(0.4),
+          width: 1,
+        ),
+        // Ombra per effetto profondità e vetro
         boxShadow: [
           BoxShadow(
             color: theme.brightness == Brightness.dark 
-                ? Colors.black.withOpacity(0.3)
-                : Colors.black.withOpacity(0.05),
-            spreadRadius: 1,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+                ? Colors.black.withOpacity(0.4)
+                : Colors.black.withOpacity(0.15),
+            blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+            spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+            offset: const Offset(0, 10),
+          ),
+          // Ombra interna per effetto vetro
+          BoxShadow(
+            color: theme.brightness == Brightness.dark 
+                ? Colors.white.withOpacity(0.1)
+                : Colors.white.withOpacity(0.6),
+            blurRadius: 2,
+            spreadRadius: -2,
+            offset: const Offset(0, 2),
           ),
         ],
+        // Gradiente più sottile per effetto vetro
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.brightness == Brightness.dark 
+              ? [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ]
+              : [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.2),
+                ],
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3420,7 +3557,7 @@ class _InstagramPageState extends State<InstagramPage> with TickerProviderStateM
                       const SizedBox(height: 16), // Spazio ridotto
                                              // Description
                        Text(
-                         'To use Instagram Business features \nyou need a Business account',
+                         'To connect Instagram \nyou need a Business account',
                          textAlign: TextAlign.center,
                          style: TextStyle(
                            fontSize: 16, // Font più grande per il messaggio principale

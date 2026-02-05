@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:video_player/video_player.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -496,7 +497,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
     final String? highlightId = widget.highlightCommentId;
     
     return Container(
-      height: MediaQuery.of(context).size.height * 0.6, // Altezza fissa al 60% dello schermo
+      height: MediaQuery.of(context).size.height * 0.7, // Altezza fissa al 70% dello schermo
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark 
             ? Color(0xFF1E1E1E) 
@@ -789,12 +790,6 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                           ? Colors.grey[800] 
                           : Colors.white,
                       borderRadius: BorderRadius.circular(25),
-                      border: Border.all(
-                        color: commentFocusNode.hasFocus 
-                            ? Color(0xFF6C63FF) 
-                            : Colors.grey[300]!,
-                        width: 1,
-                      ),
                     ),
                     child: TextField(
                       controller: commentController,
@@ -814,7 +809,10 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                           vertical: 10,
                         ),
                       ),
-                      maxLength: 200,
+                      maxLength: 120,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(120),
+                      ],
                       buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                     ),
                   ),
@@ -1600,7 +1598,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
           bottom: MediaQuery.of(context).viewInsets.bottom,
         ),
         child: Container(
-          height: MediaQuery.of(context).size.height * 0.7,
+          height: MediaQuery.of(context).size.height * 0.8,
           decoration: BoxDecoration(
             color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -1938,7 +1936,6 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                       decoration: BoxDecoration(
                         color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
                         borderRadius: BorderRadius.circular(25),
-                        border: Border.all(color: Colors.grey[300]!, width: 1),
                       ),
                       child: TextField(
                         controller: replyController,
@@ -1952,7 +1949,10 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         ),
-                        maxLength: 200,
+                        maxLength: 120,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(120),
+                        ],
                         buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
                         onSubmitted: (text) async {
                           if (text.trim().isNotEmpty) {
@@ -2560,7 +2560,7 @@ class _VideoQuickViewPageState extends State<VideoQuickViewPage> with TickerProv
             bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
           child: Container(
-            height: MediaQuery.of(context).size.height * 0.6,
+            height: MediaQuery.of(context).size.height * 0.7,
             decoration: BoxDecoration(
               color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white,
               borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),

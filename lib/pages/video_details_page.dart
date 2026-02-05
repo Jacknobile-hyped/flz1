@@ -64,6 +64,13 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
   Duration _videoDuration = Duration.zero;
   Timer? _positionUpdateTimer;
 
+  // Carousel related variables for multi-media (caroselli)
+  List<String> _mediaUrls = [];
+  List<bool> _isImageList = [];
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0;
+  String? _currentVideoUrl; // Track current video URL to avoid re-initializing unnecessarily
+
   @override
   void initState() {
     super.initState();
@@ -90,20 +97,178 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
     
     // Carica i dettagli del video
     _loadVideoDetails().then((_) {
+      // Se abbiamo un carosello (cloudflare_urls), il player viene gestito da _initializeNetworkVideoPlayer
+      final hasMultipleMedia = _mediaUrls.length > 1;
       
-      // Per i video, inizializza subito il player senza aspettare il tap dell'utente
-      if (!_isImage) {
+      // Inizializza il player solo per i video singoli (non carosello)
+      if (!hasMultipleMedia && !_isImage) {
         _initializePlayer();
       }
       
-      // Avvia subito il timer di aggiornamento della posizione
+      // Avvia il timer di aggiornamento posizione solo per i contenuti non carosello
+      if (!hasMultipleMedia) {
       _startPositionUpdateTimer();
-      
-      // Mostra subito i controlli
       setState(() {
         _showControls = true;
       });
+      }
     });
+  }
+
+  // Build carousel media preview (carosello multi-media) - stessa logica di DraftDetailsPage
+  Widget _buildCarouselMediaPreview(ThemeData theme) {
+    // Get media URLs directly from _videoDetails or widget if _mediaUrls is empty (async loading)
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    final mediaUrlsToUse = _mediaUrls.isNotEmpty
+        ? _mediaUrls
+        : (cloudflareUrls != null ? cloudflareUrls.cast<String>() : <String>[]);
+    
+    print('_buildCarouselMediaPreview (video_details_page) - mediaUrlsToUse.length: ${mediaUrlsToUse.length}');
+    print('_buildCarouselMediaPreview (video_details_page) - _carouselController: ${_carouselController != null}');
+    
+    // Get image list directly or compute it
+    List<bool> isImageListToUse;
+    if (_isImageList.length == mediaUrlsToUse.length && _isImageList.isNotEmpty) {
+      isImageListToUse = _isImageList;
+    } else {
+      isImageListToUse = List.generate(mediaUrlsToUse.length, (index) {
+        final url = mediaUrlsToUse[index].toLowerCase();
+        return url.contains('.jpg') ||
+            url.contains('.jpeg') ||
+            url.contains('.png') ||
+            url.contains('.gif') ||
+            url.contains('.webp') ||
+            url.contains('.bmp') ||
+            url.contains('.heic') ||
+            url.contains('.heif');
+      });
+    }
+    
+    // Ensure carousel controller exists
+    if (_carouselController == null && mediaUrlsToUse.isNotEmpty) {
+      _carouselController = PageController(initialPage: 0);
+      print('Created carousel controller on-the-fly (video_details_page)');
+    }
+    
+    return Stack(
+      children: [
+        // Carousel with PageView
+        PageView.builder(
+          controller: _carouselController,
+          onPageChanged: mediaUrlsToUse.length > 1 ? _onCarouselPageChanged : null,
+          itemCount: mediaUrlsToUse.length,
+          itemBuilder: (context, index) {
+            final isImage = index < isImageListToUse.length ? isImageListToUse[index] : false;
+            final mediaUrl = mediaUrlsToUse[index];
+            
+            if (isImage) {
+              // Display image directly
+              return Center(
+                child: Image.network(
+                  mediaUrl,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, url, error) => Center(
+                    child: Icon(
+                      Icons.image_not_supported,
+                      color: Colors.grey[400],
+                      size: 48,
+                    ),
+                  ),
+                ),
+              );
+            } else {
+              // Video: usa player di rete, inizializzato solo per elemento corrente
+              if (index == _currentCarouselIndex) {
+                return _buildVideoPlayerWidget(mediaUrl, theme, index == 0);
+              } else {
+                return Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.video_library,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video ${index + 1}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+        ),
+        
+        // Carousel dot indicators (only show if more than 1 item)
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            bottom: 16,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                mediaUrlsToUse.length,
+                (index) => Container(
+                  margin: EdgeInsets.symmetric(horizontal: 4),
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentCarouselIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        
+        // Badge conteggio media in alto a sinistra
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${_currentCarouselIndex + 1}/${mediaUrlsToUse.length}',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -160,11 +325,35 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
     List<Map<String, dynamic>> accounts = [];
     if (snapshot.exists && snapshot.value is Map) {
       final data = snapshot.value as Map<dynamic, dynamic>;
-      for (final entry in data.entries) {
-        final value = entry.value;
-        // Se value è una mappa e contiene almeno un campo tipico account, aggiungilo
-        if (value is Map && value.isNotEmpty) {
-          accounts.add(Map<String, dynamic>.from(value));
+      // Caso 1: nodo diretto dell'account (mappa con campi account_*)
+      final bool looksLikeSingleAccount = data.containsKey('account_username') ||
+          data.containsKey('account_display_name') ||
+          data.containsKey('account_id') ||
+          data.containsKey('youtube_video_id') ||
+          data.containsKey('media_id') ||
+          data.containsKey('post_id');
+      if (looksLikeSingleAccount) {
+        final account = Map<String, dynamic>.from(data);
+        // Normalizza YouTube: youtube_video_id -> post_id se mancante
+        if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+            account['youtube_video_id'] != null &&
+            account['youtube_video_id'].toString().isNotEmpty) {
+          account['post_id'] = account['youtube_video_id'].toString();
+        }
+        accounts.add(account);
+      } else {
+        // Caso 2: mappa di sotto-nodi account
+        for (final entry in data.entries) {
+          final value = entry.value;
+          if (value is Map && value.isNotEmpty) {
+            final account = Map<String, dynamic>.from(value);
+            if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+                account['youtube_video_id'] != null &&
+                account['youtube_video_id'].toString().isNotEmpty) {
+              account['post_id'] = account['youtube_video_id'].toString();
+            }
+            accounts.add(account);
+          }
         }
       }
     } else if (snapshot.exists && snapshot.value is List) {
@@ -172,7 +361,13 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
       final data = snapshot.value as List<dynamic>;
       for (final value in data) {
         if (value is Map && value.isNotEmpty) {
-          accounts.add(Map<String, dynamic>.from(value));
+          final account = Map<String, dynamic>.from(value);
+          if ((account['post_id'] == null || account['post_id'].toString().isEmpty) &&
+              account['youtube_video_id'] != null &&
+              account['youtube_video_id'].toString().isNotEmpty) {
+            account['post_id'] = account['youtube_video_id'].toString();
+          }
+          accounts.add(account);
         }
       }
     }
@@ -193,8 +388,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
         final db = FirebaseDatabase.instance.ref();
         final platforms = ['Facebook', 'Instagram', 'YouTube', 'Threads', 'TikTok', 'Twitter'];
         for (final platform in platforms) {
-          final platformRef = db.child('users').child('users').child(userId!).child('videos').child(videoId!).child('accounts').child(platform);
-          final accounts = await _fetchAccountsFromSubfolders(platformRef);
+          final baseUserRef = db.child('users').child('users').child(userId!);
+          // Prova prima scheduled_posts, poi fallback a videos
+          final scheduledRef = baseUserRef.child('scheduled_posts').child(videoId!).child('accounts').child(platform);
+          final videosRef = baseUserRef.child('videos').child(videoId!).child('accounts').child(platform);
+          List<Map<String, dynamic>> accounts = await _fetchAccountsFromSubfolders(scheduledRef);
+          if (accounts.isEmpty) {
+            accounts = await _fetchAccountsFromSubfolders(videosRef);
+          }
           for (final account in accounts) {
             final username = account['account_username']?.toString() ?? account['username']?.toString();
             final postId = account['post_id']?.toString();
@@ -203,8 +404,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
               final platformKey = platform.toLowerCase();
               if (platformKey == 'twitter' && postId != null) {
                 urlsMap['twitter_$username'] = 'https://twitter.com/i/status/$postId';
-              } else if (platformKey == 'youtube' && (postId != null || mediaId != null)) {
-                final videoId = postId ?? mediaId;
+              } else if (platformKey == 'youtube' && (postId != null || mediaId != null || account['youtube_video_id'] != null)) {
+                final videoId = postId ?? mediaId ?? account['youtube_video_id']?.toString();
                 urlsMap['youtube_$username'] = 'https://www.youtube.com/watch?v=$videoId';
               } else if (platformKey == 'facebook') {
                 final displayName = account['account_display_name']?.toString() ?? username;
@@ -347,12 +548,60 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
         });
       }
       
-      // Per le immagini, non è necessario inizializzare il player
-      if (_isImage) {
-        print("Content is an image, skipping video player initialization");
+      // Gestione carosello: controlla se abbiamo cloudflare_urls (lista media) - PRIORITÀ su cloudflare_url
+      final videoDataToCheck = _videoDetails ?? widget.video;
+      final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+      
+      print('Checking cloudflare_urls in video_details_page - keys: ${videoDataToCheck.keys.toList()}');
+      print('cloudflare_urls type: ${cloudflareUrls.runtimeType}, value: $cloudflareUrls');
+      
+      if (cloudflareUrls != null && cloudflareUrls.isNotEmpty) {
+        print('Found cloudflare_urls with ${cloudflareUrls.length} items (video_details_page)');
+        
+        // Popola le liste media/immagini
+        _mediaUrls = cloudflareUrls.cast<String>();
+        
+        // Heuristica per capire se è immagine o video da estensione URL
+        _isImageList = List.generate(_mediaUrls.length, (index) {
+          final url = _mediaUrls[index].toLowerCase();
+          return url.contains('.jpg') || 
+                 url.contains('.jpeg') || 
+                 url.contains('.png') || 
+                 url.contains('.gif') ||
+                 url.contains('.webp') ||
+                 url.contains('.bmp') ||
+                 url.contains('.heic') ||
+                 url.contains('.heif');
+        });
+        
+        print('Populated _mediaUrls with ${_mediaUrls.length} items, isImageList: $_isImageList (video_details_page)');
+        
+        // Inizializza il controller del carosello se abbiamo almeno un media
+        if (_mediaUrls.isNotEmpty) {
+          _carouselController = PageController(initialPage: 0);
+          print('Initialized carousel controller for ${_mediaUrls.length} media (video_details_page)');
+        }
+        
+        // Inizializza player per il primo media se è un video
+        if (_mediaUrls.isNotEmpty && !_isImageList[0]) {
+          final firstVideoUrl = _mediaUrls[0];
+          _currentVideoUrl = firstVideoUrl;
+          await _initializeNetworkVideoPlayer(firstVideoUrl);
+        } else if (_mediaUrls.isNotEmpty && _isImageList[0]) {
+          _currentVideoUrl = null;
+        }
+      } else {
+        // Nessun carosello: reset liste
+        _mediaUrls = [];
+        _isImageList = [];
       }
       
-      // We don't initialize the video player here, we wait for user interaction
+      // Per le immagini singole, non è necessario inizializzare il player qui
+      if (_isImage && _mediaUrls.isEmpty) {
+        print("Content is a single image, skipping video player initialization");
+      }
+      
+      // Non inizializziamo qui il player per i video: lo faremo in initState in base al numero di media
     } catch (e) {
       print('Error loading content details: $e');
       // Fallback to widget data on error
@@ -1007,7 +1256,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                                 platform.toUpperCase(),
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
-                                  color: _getPlatformColor(platform),
+                                  color: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                      ? Colors.white
+                                      : _getPlatformColor(platform),
                                 ),
                               ),
                             ],
@@ -1028,8 +1279,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                           final platformKey = platform.toLowerCase();
                           if (platformKey == 'twitter' && postId != null) {
                             postUrl = 'https://twitter.com/i/status/$postId';
-                          } else if (platformKey == 'youtube' && (postId != null || mediaId != null)) {
-                            final videoId = postId ?? mediaId;
+                          } else if (platformKey == 'youtube' && (postId != null || mediaId != null || account['youtube_video_id'] != null)) {
+                            final videoId = postId ?? mediaId ?? account['youtube_video_id']?.toString();
                             postUrl = 'https://www.youtube.com/watch?v=$videoId';
                           } else if (platformKey == 'facebook') {
                             postUrl = 'https://m.facebook.com/profile.php?id=$username';
@@ -1137,7 +1388,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                                       onPressed: () => _showPostDetailsBottomSheet(context, account, platform),
                                       icon: Icon(Icons.info_outline, size: 20),
                                       style: IconButton.styleFrom(
-                                        foregroundColor: _getPlatformColor(platform),
+                                        foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                            ? Colors.white
+                                            : _getPlatformColor(platform),
                                         backgroundColor: _getPlatformLightColor(platform),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(8),
@@ -1162,7 +1415,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                                       },
                                       icon: const Icon(Icons.open_in_new, size: 20),
                                       style: IconButton.styleFrom(
-                                        foregroundColor: _getPlatformColor(platform),
+                                        foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                            ? Colors.white
+                                            : _getPlatformColor(platform),
                                         backgroundColor: _getPlatformLightColor(platform),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(8),
@@ -1209,8 +1464,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                   bool hasMediaId = false;
                   if (platformKey == 'twitter' && postId != null) {
                     postUrl = 'https://twitter.com/i/status/$postId';
-                  } else if (platformKey == 'youtube' && (postId != null || mediaId != null)) {
-                    final videoId = postId ?? mediaId;
+                  } else if (platformKey == 'youtube' && (postId != null || mediaId != null || account['youtube_video_id'] != null)) {
+                    final videoId = postId ?? mediaId ?? account['youtube_video_id']?.toString();
                     postUrl = 'https://www.youtube.com/watch?v=$videoId';
                   } else if (platformKey == 'facebook') {
                     // Per Facebook, apri direttamente la pagina profilo
@@ -1363,7 +1618,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                         platform.toUpperCase(),
                         style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: _getPlatformColor(platform),
+                            color: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                ? Colors.white
+                                : _getPlatformColor(platform),
                         ),
                       ),
                     ],
@@ -1480,7 +1737,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                               onPressed: () => _showPostDetailsBottomSheet(context, account, platform),
                               icon: Icon(Icons.info_outline, size: 20),
                               style: IconButton.styleFrom(
-                              foregroundColor: _getPlatformColor(platform),
+                              foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                  ? Colors.white
+                                  : _getPlatformColor(platform),
                                 backgroundColor: _getPlatformLightColor(platform),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -1518,7 +1777,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                                 },
                           icon: const Icon(Icons.open_in_new, size: 20),
                           style: IconButton.styleFrom(
-                                foregroundColor: _getPlatformColor(platform),
+                                foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                    ? Colors.white
+                                    : _getPlatformColor(platform),
                               backgroundColor: _getPlatformLightColor(platform),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -2383,7 +2644,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
   // Funzione per mostrare la tendina con i dettagli del post
   void _showPostDetailsBottomSheet(BuildContext context, Map<String, dynamic> account, String platform) {
     final theme = Theme.of(context);
-    final platformColor = _getPlatformColor(platform);
+    final platformColor = (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+        ? Colors.white
+        : _getPlatformColor(platform);
     // Estrai i dati del post, compatibile con nuovo formato
     final username = account['account_username']?.toString() ?? account['username']?.toString() ?? '';
     final displayName = account['account_display_name']?.toString() ?? account['display_name']?.toString() ?? username;
@@ -2664,6 +2927,18 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
 
   // Metodo per costruire la sezione video
   Widget _buildVideoSection(ThemeData theme, double mediaWidth, Color videoBackgroundColor) {
+    // Check if we have cloudflare_urls - prioritize cloudflare_urls over cloudflare_url
+    // Use carousel even if there's only 1 item in cloudflare_urls to avoid conflicts with cloudflare_url
+    // Use _videoDetails if available, otherwise widget.video
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    final bool hasCloudflareUrls = cloudflareUrls != null && cloudflareUrls.isNotEmpty;
+    final bool hasMultipleMedia = hasCloudflareUrls && cloudflareUrls!.length > 1;
+    
+    print('_buildVideoSection (video_details_page) - videoDataToCheck keys: ${videoDataToCheck.keys.toList()}');
+    print('_buildVideoSection (video_details_page) - cloudflareUrls: $cloudflareUrls');
+    print('_buildVideoSection (video_details_page) - hasCloudflareUrls: $hasCloudflareUrls, hasMultipleMedia: $hasMultipleMedia');
+    
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -2675,12 +2950,15 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
             child: GestureDetector(
               onTap: () {
                 print("Tap on video section container");
+                // Per i caroselli, i tap sono gestiti internamente al widget del carosello
+                if (!hasCloudflareUrls) {
                 if (!_isImage && (_videoPlayerController == null || !_isVideoInitialized)) {
                   _toggleVideoPlayback();
                 } else if (!_isImage && _isVideoInitialized) {
                   setState(() {
                     _showControls = !_showControls;
                   });
+                  }
                 }
               },
               child: Container(
@@ -2698,7 +2976,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Stack(
+                child: hasCloudflareUrls
+                    ? _buildCarouselMediaPreview(theme)
+                    : Stack(
                   children: [
                     // If it's an image, display it directly
                     if (_isImage)
@@ -2918,7 +3198,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
                           ),
                         ],
                       )
-                    // Otherwise show thumbnail from Cloudflare if available
+                          // Otherwise show thumbnail from Cloudflare if available (new format)
                     else if (_videoDetails?['thumbnail_url'] != null &&
                             _videoDetails!['thumbnail_url'].toString().isNotEmpty)
                       Container(
@@ -2952,6 +3232,311 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
         ],
       ),
     );
+  }
+
+  // Handle carousel page change (carosello multi-media)
+  void _onCarouselPageChanged(int index) {
+    setState(() {
+      _currentCarouselIndex = index;
+    });
+    
+    // Dispose previous video player if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+      _isVideoInitialized = false;
+      _currentVideoUrl = null;
+    }
+    
+    // Reset controls
+    setState(() {
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    // Initialize video player for current media if it's a video
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    if (cloudflareUrls != null && index < cloudflareUrls.length) {
+      final mediaUrl = cloudflareUrls[index] as String?;
+      if (mediaUrl != null) {
+        final lower = mediaUrl.toLowerCase();
+        final isImage = lower.contains('.jpg') ||
+            lower.contains('.jpeg') ||
+            lower.contains('.png') ||
+            lower.contains('.gif') ||
+            lower.contains('.webp') ||
+            lower.contains('.bmp') ||
+            lower.contains('.heic') ||
+            lower.contains('.heif');
+        if (!isImage) {
+          _currentVideoUrl = mediaUrl;
+          _initializeNetworkVideoPlayer(mediaUrl);
+        } else {
+          _currentVideoUrl = null;
+        }
+      }
+    }
+  }
+
+  // Build video player widget for network URL (per singolo elemento del carosello)
+  Widget _buildVideoPlayerWidget(String videoUrl, ThemeData theme, bool isFirstVideo) {
+    // Show loading state while video is initializing or if URL doesn't match
+    if (!_isVideoInitialized ||
+        _videoPlayerController == null ||
+        _currentVideoUrl != videoUrl) {
+      // Show thumbnail while loading only for first video (se disponibile)
+      final thumbnailUrl = isFirstVideo
+          ? (_videoDetails?['thumbnail_cloudflare_url'] as String?)
+          : null;
+      
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+            Center(
+              child: Image.network(
+                thumbnailUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (context, url, error) => Container(
+                  color: Colors.black,
+                ),
+              ),
+            )
+          else
+            Container(color: Colors.black),
+          Container(
+            color: Colors.black.withOpacity(0.3),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Loading video...',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    
+    // Show video player
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Video Player
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _showControls = !_showControls;
+            });
+          },
+          child: _buildVideoPlayer(_videoPlayerController!),
+        ),
+        
+        // Video Controls (same style as singolo video)
+        AnimatedOpacity(
+          opacity: _showControls ? 1.0 : 0.0,
+          duration: Duration(milliseconds: 300),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isSmallScreen = constraints.maxHeight < 300;
+              return Stack(
+                children: [
+                  Container(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.3),
+                          Colors.transparent,
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.4),
+                        ],
+                        stops: [0.0, 0.2, 0.8, 1.0],
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                          color: Colors.white,
+                          size: isSmallScreen ? 32 : 40,
+                        ),
+                        padding: EdgeInsets.all(isSmallScreen ? 6 : 8),
+                        onPressed: _toggleVideoPlayback,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: EdgeInsets.only(top: 20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.6),
+                            Colors.black.withOpacity(0.2),
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, 0.5, 1.0],
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(_currentPosition),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  _formatDuration(_videoDuration),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SliderTheme(
+                            data: SliderThemeData(
+                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: isSmallScreen ? 3 : 5),
+                              trackHeight: isSmallScreen ? 2 : 3,
+                              trackShape: RoundedRectSliderTrackShape(),
+                              activeTrackColor: Colors.white,
+                              inactiveTrackColor: Colors.white.withOpacity(0.3),
+                              thumbColor: Colors.white,
+                              overlayColor: theme.colorScheme.primary.withOpacity(0.3),
+                            ),
+                            child: Slider(
+                              value: _currentPosition.inSeconds.toDouble(),
+                              min: 0.0,
+                              max: _videoDuration.inSeconds.toDouble() > 0
+                                  ? _videoDuration.inSeconds.toDouble()
+                                  : 1.0,
+                              onChanged: (value) {
+                                _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
+                                setState(() {
+                                  _showControls = true;
+                                });
+                              },
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Initialize network video player for carosello
+  Future<void> _initializeNetworkVideoPlayer(String videoUrl) async {
+    // Dispose previous controller if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+    }
+    
+    setState(() {
+      _isVideoInitialized = false;
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    try {
+      print('Initializing network video player for URL (video_details_page): $videoUrl');
+      
+      _videoPlayerController = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: false,
+        ),
+      );
+      
+      _videoPlayerController!.addListener(_onVideoPositionChanged);
+      
+      await _videoPlayerController!.initialize();
+      
+      if (!mounted || _isDisposed) return;
+      
+      setState(() {
+        _isVideoInitialized = true;
+        _videoDuration = _videoPlayerController!.value.duration;
+        _currentPosition = Duration.zero;
+        _showControls = true;
+        _currentVideoUrl = videoUrl;
+      });
+      
+      print('Network video player initialized successfully (video_details_page) for URL: $videoUrl');
+    } catch (e) {
+      print('Error initializing network video player (video_details_page): $e');
+      
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isVideoInitialized = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Unable to load video: ${e.toString().substring(0, min(e.toString().length, 50))}...',
+            ),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   // Metodo per costruire la sezione accounts
@@ -3176,6 +3761,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
 
   /// Utility: ritorna l'uid dell'utente corrente (se autenticato)
   String? get _currentUserId => FirebaseAuth.instance.currentUser?.uid;
+
+  /// Ritorna true se il contenuto proviene dai scheduled_posts
+  bool _isScheduledPost() {
+    final status = (_videoDetails?['status'] ?? widget.video['status'])?.toString().toLowerCase();
+    return status == 'scheduled';
+  }
 
   /// Estrae solo la parte del messaggio tra 'message' e 'type', senza parentesi graffe, doppi punti, virgole e virgolette
   /// Mostra solo il contenuto del messaggio di errore senza dettagli tecnici
@@ -3471,29 +4062,63 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Facebook/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Facebook');
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Facebook');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Facebook');
+            }
             
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, potrebbe essere:
+              // - un oggetto diretto
+              // - una lista di oggetti
+              // - una mappa di oggetti indicizzati (scheduled_posts)
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                
-                if (accountDisplayName == displayName) {
-                  postId = videoAccounts['post_id']?.toString();
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  // Oggetto diretto
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  if (accountDisplayName == displayName) {
+                    postId = videoAccounts['post_id']?.toString();
+                    accountId = videoAccounts['account_id']?.toString();
+                    print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                  }
+                } else {
+                  // Mappa indicizzata -> itera i valori
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      if (accountDisplayName == displayName) {
+                        postId = accountData['post_id']?.toString();
+                        accountId = accountData['account_id']?.toString();
+                        print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - mappa indicizzata)');
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
-                // Caso: più account per piattaforma (lista di oggetti)
+                // Lista di oggetti
                 for (final accountData in videoAccounts) {
                   if (accountData is Map) {
                     final accountDisplayName = accountData['account_display_name']?.toString();
-                    
                     if (accountDisplayName == displayName) {
                       postId = accountData['post_id']?.toString();
                       accountId = accountData['account_id']?.toString();
@@ -3505,23 +4130,55 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
               }
             }
           } else {
-            // --- FORMATO VECCHIO: users/users/[uid]/videos/[idvideo]/accounts/Facebook/[numero]/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Facebook');
+            // --- FORMATO VECCHIO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Facebook');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Facebook');
+            }
             
             if (videoAccountsSnap.exists) {
-              final videoAccounts = videoAccountsSnap.value as List<dynamic>;
+              final videoAccounts = videoAccountsSnap.value;
               
-              // Cerca l'account che corrisponde al display_name
-              for (final accountData in videoAccounts) {
-                if (accountData is Map) {
-                  final accountDisplayName = accountData['display_name']?.toString();
-                  
-                  if (accountDisplayName == displayName) {
-                    postId = accountData['post_id']?.toString();
-                    accountId = accountData['id']?.toString();
-                    print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
-                    break;
+              if (videoAccounts is List) {
+                // Lista classica
+                for (final accountData in videoAccounts) {
+                  if (accountData is Map) {
+                    final accountDisplayName = accountData['display_name']?.toString();
+                    if (accountDisplayName == displayName) {
+                      postId = accountData['post_id']?.toString();
+                      accountId = accountData['id']?.toString();
+                      print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
+                      break;
+                    }
+                  }
+                }
+              } else if (videoAccounts is Map) {
+                // Mappa indicizzata per formati legacy/scheduled
+                for (final entry in videoAccounts.entries) {
+                  final accountData = entry.value;
+                  if (accountData is Map) {
+                    final accountDisplayName = (accountData['display_name'] ?? accountData['account_display_name'])?.toString();
+                    if (accountDisplayName == displayName) {
+                      postId = (accountData['post_id'] ?? accountData['media_id'])?.toString();
+                      accountId = (accountData['id'] ?? accountData['account_id'])?.toString();
+                      print('[FACEBOOK] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (mappa indicizzata)');
+                      break;
+                    }
                   }
                 }
               }
@@ -3614,23 +4271,56 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Instagram/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Instagram');
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Instagram');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Instagram');
+            }
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, può essere oggetto diretto, lista o mappa indicizzata
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                if (accountDisplayName == displayName) {
-                  mediaId = videoAccounts['media_id']?.toString();
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  // Oggetto diretto
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  if (accountDisplayName == displayName) {
+                    mediaId = videoAccounts['media_id']?.toString();
+                    accountId = videoAccounts['account_id']?.toString();
+                    print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                  }
+                } else {
+                  // Mappa indicizzata -> itera valori
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      if (accountDisplayName == displayName) {
+                        mediaId = accountData['media_id']?.toString();
+                        accountId = accountData['account_id']?.toString();
+                        print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato nuovo - mappa indicizzata)');
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
-                // Caso: più account per piattaforma (lista di oggetti)
+                // Lista di oggetti
                 for (final accountData in videoAccounts) {
                   if (accountData is Map) {
                     final accountDisplayName = accountData['account_display_name']?.toString();
@@ -3645,21 +4335,52 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
               }
             }
           } else {
-            // --- FORMATO VECCHIO: users/users/[uid]/videos/[idvideo]/accounts/Instagram/[numero]/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Instagram');
+            // --- FORMATO VECCHIO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Instagram');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Instagram');
+            }
             if (videoAccountsSnap.exists) {
-              final videoAccounts = videoAccountsSnap.value as List<dynamic>;
+              final videoAccounts = videoAccountsSnap.value;
               
-              // Cerca l'account che corrisponde al display_name
-              for (final accountData in videoAccounts) {
-                if (accountData is Map) {
-                  final accountDisplayName = accountData['display_name']?.toString();
-                  if (accountDisplayName == displayName) {
-                    mediaId = accountData['media_id']?.toString();
-                    accountId = accountData['id']?.toString();
-                    print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato vecchio)');
-                    break;
+              if (videoAccounts is List) {
+                for (final accountData in videoAccounts) {
+                  if (accountData is Map) {
+                    final accountDisplayName = accountData['display_name']?.toString();
+                    if (accountDisplayName == displayName) {
+                      mediaId = accountData['media_id']?.toString();
+                      accountId = accountData['id']?.toString();
+                      print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (formato vecchio)');
+                      break;
+                    }
+                  }
+                }
+              } else if (videoAccounts is Map) {
+                for (final entry in videoAccounts.entries) {
+                  final accountData = entry.value;
+                  if (accountData is Map) {
+                    final accountDisplayName = (accountData['display_name'] ?? accountData['account_display_name'])?.toString();
+                    if (accountDisplayName == displayName) {
+                      mediaId = accountData['media_id']?.toString();
+                      accountId = (accountData['id'] ?? accountData['account_id'])?.toString();
+                      print('[INSTAGRAM] Trovato media_id=$mediaId, accountId=$accountId per display_name=$displayName (mappa indicizzata)');
+                      break;
+                    }
                   }
                 }
               }
@@ -3763,23 +4484,56 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
           String? accountId;
           
           if (isNewFormat) {
-            // --- FORMATO NUOVO: users/users/[uid]/videos/[idvideo]/accounts/Threads/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Threads');
+            // --- FORMATO NUOVO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Threads');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Threads');
+            }
             if (videoAccountsSnap.exists) {
               final videoAccounts = videoAccountsSnap.value;
               
-              // Nel formato nuovo, potrebbe essere un oggetto singolo o una lista di oggetti
+              // Nel formato nuovo, può essere oggetto diretto, lista o mappa indicizzata
               if (videoAccounts is Map) {
-                // Caso: un solo account per piattaforma (oggetto diretto)
-                final accountDisplayName = videoAccounts['account_display_name']?.toString();
-                if (accountDisplayName == displayName) {
-                  postId = videoAccounts['post_id']?.toString(); // <-- uso post_id
-                  accountId = videoAccounts['account_id']?.toString();
-                  print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                if (videoAccounts.containsKey('account_display_name')) {
+                  // Oggetto diretto
+                  final accountDisplayName = videoAccounts['account_display_name']?.toString();
+                  if (accountDisplayName == displayName) {
+                    postId = videoAccounts['post_id']?.toString(); // <-- uso post_id
+                    accountId = videoAccounts['account_id']?.toString();
+                    print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - singolo account)');
+                  }
+                } else {
+                  // Mappa indicizzata -> itera i valori
+                  for (final entry in videoAccounts.entries) {
+                    final accountData = entry.value;
+                    if (accountData is Map) {
+                      final accountDisplayName = accountData['account_display_name']?.toString();
+                      if (accountDisplayName == displayName) {
+                        postId = accountData['post_id']?.toString(); // <-- uso post_id
+                        accountId = accountData['account_id']?.toString();
+                        print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato nuovo - mappa indicizzata)');
+                        break;
+                      }
+                    }
+                  }
                 }
               } else if (videoAccounts is List) {
-                // Caso: più account per piattaforma (lista di oggetti)
+                // Lista di oggetti
                 for (final accountData in videoAccounts) {
                   if (accountData is Map) {
                     final accountDisplayName = accountData['account_display_name']?.toString();
@@ -3794,21 +4548,52 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
               }
             }
           } else {
-            // --- FORMATO VECCHIO: users/users/[uid]/videos/[idvideo]/accounts/Threads/[numero]/ ---
-            final videoAccountsRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child('Threads');
+            // --- FORMATO VECCHIO: prova scheduled_posts poi fallback videos ---
+            DatabaseReference videoAccountsRef = db
+                .child('users')
+                .child('users')
+                .child(userId)
+                .child('scheduled_posts')
+                .child(videoId)
+                .child('accounts')
+                .child('Threads');
             final videoAccountsSnap = await videoAccountsRef.get();
+            if (!videoAccountsSnap.exists) {
+              videoAccountsRef = db
+                  .child('users')
+                  .child('users')
+                  .child(userId)
+                  .child('videos')
+                  .child(videoId)
+                  .child('accounts')
+                  .child('Threads');
+            }
             if (videoAccountsSnap.exists) {
-              final videoAccounts = videoAccountsSnap.value as List<dynamic>;
+              final videoAccounts = videoAccountsSnap.value;
               
-              // Cerca l'account che corrisponde al display_name
-              for (final accountData in videoAccounts) {
-                if (accountData is Map) {
-                  final accountDisplayName = accountData['display_name']?.toString();
-                  if (accountDisplayName == displayName) {
-                    postId = accountData['post_id']?.toString(); // <-- uso post_id
-                    accountId = accountData['id']?.toString();
-                    print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
-                    break;
+              if (videoAccounts is List) {
+                for (final accountData in videoAccounts) {
+                  if (accountData is Map) {
+                    final accountDisplayName = accountData['display_name']?.toString();
+                    if (accountDisplayName == displayName) {
+                      postId = accountData['post_id']?.toString(); // <-- uso post_id
+                      accountId = accountData['id']?.toString();
+                      print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (formato vecchio)');
+                      break;
+                    }
+                  }
+                }
+              } else if (videoAccounts is Map) {
+                for (final entry in videoAccounts.entries) {
+                  final accountData = entry.value;
+                  if (accountData is Map) {
+                    final accountDisplayName = (accountData['display_name'] ?? accountData['account_display_name'])?.toString();
+                    if (accountDisplayName == displayName) {
+                      postId = accountData['post_id']?.toString();
+                      accountId = (accountData['id'] ?? accountData['account_id'])?.toString();
+                      print('[THREADS] Trovato post_id=$postId, accountId=$accountId per display_name=$displayName (mappa indicizzata)');
+                      break;
+                    }
                   }
                 }
               }
@@ -3993,8 +4778,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> with SingleTickerPr
     final platforms = ['Facebook', 'Instagram', 'YouTube', 'Threads', 'TikTok', 'Twitter'];
     Map<String, List<Map<String, dynamic>>> result = {};
     for (final platform in platforms) {
-      final platformRef = db.child('users').child('users').child(userId).child('videos').child(videoId).child('accounts').child(platform);
-      final accounts = await _fetchAccountsFromSubfolders(platformRef);
+      final baseUserRef = db.child('users').child('users').child(userId);
+      // Tenta scheduled_posts; se vuoto, fallback a videos
+      final scheduledPlatformRef = baseUserRef.child('scheduled_posts').child(videoId).child('accounts').child(platform);
+      final videosPlatformRef = baseUserRef.child('videos').child(videoId).child('accounts').child(platform);
+      List<Map<String, dynamic>> accounts = await _fetchAccountsFromSubfolders(scheduledPlatformRef);
+      if (accounts.isEmpty) {
+        accounts = await _fetchAccountsFromSubfolders(videosPlatformRef);
+      }
       if (accounts.isNotEmpty) {
         result[platform] = accounts;
       }

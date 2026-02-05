@@ -39,10 +39,8 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'solution': 'If the app doesn\'t open or crashes at startup:\n\n'
               '1. Make sure you have the latest version installed\n'
               '2. Restart your device\n'
-              '3. Free up device storage space (at least 500MB free)\n'
-              '4. Clear the app cache (Settings > Apps > Fluzar > Storage > Clear Cache)\n'
-              '5. Uninstall and reinstall the app\n'
-              '6. If the problem persists, check if your device OS is compatible (requires Android 6.0+ or iOS 13+)',
+              '3. Free up device storage space\n'
+              '4. Clear the app cache (Settings > Apps > Fluzar > Storage > Clear Cache)',
           'icon': Icons.phonelink_erase,
         },
         {
@@ -67,16 +65,6 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '6. Try disabling any VPN or proxy you might be using',
           'icon': Icons.data_usage,
         },
-        {
-          'title': 'High Battery Drain',
-          'solution': 'If the app is consuming too much battery:\n\n'
-              '1. Disable background refresh in app settings\n'
-              '2. Reduce notification frequency\n'
-              '3. Close the app when not in use instead of leaving it in the background\n'
-              '4. Update to the latest version (battery optimizations are frequently improved)\n'
-              '5. Check if your device battery settings have Fluzar set to "Optimized"',
-          'icon': Icons.battery_alert,
-        },
       ],
     },
     {
@@ -87,10 +75,10 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'solution': 'If you can\'t register:\n\n'
               '1. Verify you have a stable internet connection\n'
               '2. Check if the email is already registered (try password recovery instead)\n'
-              '3. Use a valid email and password (min. 8 characters, including a number and symbol)\n'
+              '3. Use a valid email and password (min. 6 characters, including a number and symbol)\n'
               '4. Make sure you\'re using a properly formatted email address\n'
               '5. If using social login, ensure your social accounts are active\n'
-              '6. Try an alternative email provider if problems persist (some domains may be restricted)',
+              '6. Try an alternative email provider if problems persist',
           'icon': Icons.app_registration,
         },
         {
@@ -118,12 +106,10 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
         {
           'title': 'Login Session Expired',
           'solution': 'If you\'re frequently logged out or see "session expired":\n\n'
-              '1. Check if you\'re using Fluzar on multiple devices (there\'s a limit of 3 active sessions)\n'
+              '1. Check if you\'re using Fluzar on multiple devices\n'
               '2. Make sure your device time and date are set correctly\n'
-              '3. Clear browser cookies if using the web version\n'
-              '4. Check if your account has been accessed from an unusual location (you may receive an email about this)\n'
-              '5. For security, sessions expire after 30 days of inactivity\n'
-              '6. Try changing your password if you suspect unauthorized access',
+              '3. Check if your account has been accessed from an unusual location (you may receive an email about this)\n'
+              '4. Try changing your password if you suspect unauthorized access',
           'icon': Icons.timer_off,
         },
       ],
@@ -135,12 +121,11 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'title': 'Instagram Connection Issues',
           'solution': 'If you can\'t connect Instagram:\n\n'
               '1. Ensure you have an Instagram Business or Creator account (Personal accounts won\'t work)\n'
-              '2. Verify it\'s linked to a Facebook Page (required for API access)\n'
+              '2. Verify it\'s linked to a Facebook Page (required for analytics access)\n'
               '3. Check all permissions are enabled during the connection process\n'
               '4. Make sure you\'re using the account owner credentials (not a page manager)\n'
               '5. Try disconnecting and reconnecting the account\n'
-              '6. Verify you\'re not exceeding Instagram\'s API limits (max 25 posts per 24 hours)\n'
-              '7. Instagram sometimes changes their API - check if the app needs an update',
+              '6. Verify you\'re not exceeding Instagram\'s limits (max 25 posts per 24 hours)',
           'icon': Icons.camera_alt,
         },
         {
@@ -168,15 +153,11 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'icon': Icons.play_circle,
         },
         {
-          'title': 'TikTok/Snapchat Connection',
-          'solution': 'If TikTok/Snapchat won\'t connect:\n\n'
+          'title': 'TikTok Connection',
+          'solution': 'If TikTok won\'t connect:\n\n'
               '1. Ensure you have a business account (creator accounts for TikTok)\n'
               '2. Accept all app permissions during the connection flow\n'
-              '3. Use the in-app browser for authentication (avoid external browsers)\n'
-              '4. Verify your account meets minimum follower requirements (if any)\n'
-              '5. For TikTok, verify your account isn\'t set to private\n'
-              '6. These platforms have stricter API limitations - check the platform\'s developer terms\n'
-              '7. If your account is new, you may need to wait 7-14 days before connecting',
+              '3. For TikTok, verify your account isn\'t set to private',
           'icon': Icons.video_library,
         },
         {
@@ -184,11 +165,9 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'solution': 'If Twitter/X won\'t connect or shows errors:\n\n'
               '1. Ensure your Twitter/X account has a verified email address\n'
               '2. Check if your account is in good standing (not restricted or limited)\n'
-              '3. Verify you\'re using the latest authentication method (Twitter frequently updates its API)\n'
-              '4. For business accounts, ensure your developer account is properly set up\n'
-              '5. Twitter has API usage limitations - check if you\'ve exceeded your quota\n'
-              '6. Try logging out of Twitter on all devices, then reconnecting\n'
-              '7. If you recently changed your username, disconnect and reconnect your account',
+              '3. For business accounts, ensure your developer account is properly set up\n'
+              '4. Try logging out of Twitter on all devices, then reconnecting\n'
+              '5. If you recently changed your username, disconnect and reconnect your account',
           'icon': Icons.flutter_dash,
         },
         {
@@ -218,10 +197,7 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
         {
           'title': 'YouTube Daily Upload Limits',
           'solution': 'YouTube has specific daily upload limits for accounts:\n\n'
-              '1. New accounts (less than 30 days old): 6 uploads per day\n'
-              '2. Established accounts (30+ days old): 10 uploads per day\n'
-              '3. Verified accounts: 10 uploads per day\n'
-              '4. YouTube Premium accounts: 10 uploads per day\n\n'
+              'During upload, if YouTube displays the error “Daily upload limit reached,” it means that the channel has reached the maximum number of videos that can be uploaded in the last 24 hours. This limit is automatically imposed by YouTube to prevent abuse or suspicious activity and may vary depending on the age of the channel, its history, and the region.\n\n'
               'Important notes:\n'
               '• These limits apply to all uploads, including scheduled posts\n'
               '• The limit resets at midnight Pacific Time (PST/PDT)\n'
@@ -238,8 +214,8 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
         {
           'title': 'Video Upload Issues',
           'solution': 'If you can\'t upload a video:\n\n'
-              '1. Check if file format is supported (MP4, MOV, WEBM, AVI)\n'
-              '2. Ensure video length meets platform limits (90 seconds - 15 minutes depending on platform)\n'
+              '1. Check if file format is supported\n'
+              '2. Ensure video length meets platform limits\n'
               '3. File size shouldn\'t exceed 500MB for optimal performance\n'
               '4. Verify you have a stable internet connection (WiFi recommended for large uploads)\n'
               '5. Check available storage on your device\n'
@@ -256,7 +232,7 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '4. Verify the content meets platform guidelines (check for restricted content)\n'
               '5. Some platforms have daily publishing limits - you may have exceeded them\n'
               '6. Check your scheduled time isn\'t in the past\n'
-              '7. If publishing to Instagram, ensure your caption doesn\'t have too many hashtags (max 30)',
+              '7. If publishing to Instagram, ensure your caption doesn\'t have too many hashtags',
           'icon': Icons.publish,
         },
         {
@@ -286,13 +262,10 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
         {
           'title': 'Failed Scheduled Posts',
           'solution': 'If scheduled posts aren\'t publishing:\n\n'
-              '1. Verify your device has sufficient battery and isn\'t in power saving mode\n'
-              '2. Check if app is allowed to run in background (check device settings)\n'
-              '3. Ensure you have active internet connection at the scheduled time\n'
-              '4. Verify platform connection hasn\'t expired (re-authenticate if needed)\n'
-              '5. Make sure your account is in good standing (not restricted)\n'
-              '6. Check if you\'ve exceeded daily posting limits for the platform\n'
-              '7. For precise timing, keep the app running in the background',
+              '1. Verify platform connection hasn\'t expired (re-authenticate if needed)\n'
+              '2. Make sure your account is in good standing (not restricted)\n'
+              '3. Check if you\'ve exceeded daily posting limits for the platform\n'
+              '4. It may take up to 5 minutes for all videos to be published and saved in your Fluzar account history.',
           'icon': Icons.schedule_send,
         },
       ],
@@ -307,9 +280,7 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '2. Check if account was removed/disconnected (platforms may disconnect after 60-90 days)\n'
               '3. Try reconnecting manually\n'
               '4. Verify you\'re using the same Fluzar account where connections were made\n'
-              '5. Check if platform updated their API (may require reconnection)\n'
-              '6. Make sure you haven\'t exceeded the maximum account connections (limit: 15 accounts total)\n'
-              '7. Log out and log back in to refresh your account state',
+              '5. Log out and log back in to refresh your account state',
           'icon': Icons.account_circle_outlined,
         },
         {
@@ -329,23 +300,18 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'solution': 'If having issues using multiple devices:\n\n'
               '1. Verify you\'re using the same account on all devices\n'
               '2. Be aware some features may not sync instantly between devices\n'
-              '3. Try logging out and back in on all devices to refresh the state\n'
-              '4. Check if you\'ve reached the device limit (max 3 active devices per account)\n'
-              '5. Ensure all devices are running the same version of the app\n'
-              '6. Scheduled posts are tied to the device they were created on\n'
-              '7. Premium features are account-bound, not device-bound',
+              '3. Ensure all devices are running the same version of the app\n'
+              '4. Premium features are account-bound, not device-bound',
           'icon': Icons.devices,
         },
         {
           'title': 'Analytics Not Accurate',
           'solution': 'If analytics seem incorrect or not updating:\n\n'
               '1. Analytics typically have a 24-48 hour delay from platforms\n'
-              '2. Check if the platform is experiencing known API issues\n'
-              '3. Verify account connections are still valid\n'
-              '4. Some metrics are only available for business/premium accounts\n'
-              '5. Each platform calculates metrics differently (view definitions in help)\n'
-              '6. Historical data older than 30 days may be aggregated or summarized\n'
-              '7. Free accounts have limited analytics refresh rate (once per day)',
+              '2. Verify account connections are still valid\n'
+              '3. Some metrics are only available for business/premium accounts\n'
+              '4. Each platform calculates metrics differently (view definitions in help)\n'
+              '5. Historical data older than 30 days may be aggregated or summarized',
           'icon': Icons.analytics,
         },
         {
@@ -355,7 +321,7 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '2. Check if payment was actually processed (bank statement)\n'
               '3. Free trial users: check remaining trial period\n'
               '4. Subscription status updates may take up to 24 hours to reflect\n'
-              '5. If downgrading, features remain until current billing period ends\n'
+              '5. If downgrading, features will be immediately and automatically deactivated\n'
               '6. Contact your payment provider if charges appear but subscription isn\'t active\n'
               '7. For refund requests, contact support with your order number',
           'icon': Icons.payment,
@@ -375,8 +341,8 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
         {
           'title': 'TikTok Username Not Displaying',
           'solution':               'If your TikTok username is not showing correctly in Fluzar:\n\n'
-              '1. This is a known limitation of TikTok\'s API service\n'
-              '2. TikTok does not provide username information through their API\n'
+              '1. This is a known limitation of TikTok\'s service\n'
+              '2. TikTok does not provide username information\n'
               '3. This affects all third-party apps, not just Fluzar\n'
               '4. Your TikTok account is still properly connected and functional\n'
               '5. You can still upload and schedule content to TikTok normally\n'
@@ -405,7 +371,7 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
       'items': [
         {
           'title': 'Missing Notifications',
-          'solution': 'If not receiving publishing notifications:\n\n'
+          'solution': 'If not receiving scheduled posts notifications:\n\n'
               '1. Enable notifications in phone settings (System Settings > Apps > Fluzar > Notifications)\n'
               '2. Verify app notification settings are enabled in the Fluzar settings menu\n'
               '3. Update to the latest app version\n'
@@ -414,30 +380,6 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '6. Try reinstalling the app if other solutions don\'t work\n'
               '7. For iOS, ensure Background App Refresh is enabled for Fluzar',
           'icon': Icons.notifications_active,
-        },
-        {
-          'title': 'No Posting Suggestions',
-          'solution': 'If not receiving posting time suggestions:\n\n'
-              '1. Connect at least one social account (more accounts improve recommendations)\n'
-              '2. Wait 24-72 hours after first uploads for analysis to generate\n'
-              '3. Check your notification settings\n'
-              '4. Need minimum 5 posts history for initial recommendations\n'
-              '5. Ensure your account has enough followers (min. 100) for audience insights\n'
-              '6. Suggestions are based on your specific audience - new accounts may have limited data\n'
-              '7. Premium subscription required for advanced time recommendations',
-          'icon': Icons.schedule,
-        },
-        {
-          'title': 'Content Recommendations Issues',
-          'solution': 'If content recommendations are missing or irrelevant:\n\n'
-              '1. This feature requires premium subscription\n'
-              '2. Ensure your niche/categories are properly set in your profile\n'
-              '3. Content recommendations require at least 2 weeks of posting history\n'
-              '4. Update your interests in settings for better targeting\n'
-              '5. Content recommendations refresh weekly - check back later\n'
-              '6. The algorithm improves with usage - interact with suggestions to improve them\n'
-              '7. For specialized niches, recommendations may be more limited',
-          'icon': Icons.recommend,
         },
       ],
     },
@@ -448,24 +390,21 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
           'title': 'Video Optimization Failed',
           'solution': 'If video optimization isn\'t working properly:\n\n'
               '1. Check if your device has sufficient processing power\n'
-              '2. Ensure enough free storage space (at least 3x video size needed)\n'
+              '2. Ensure enough free storage space\n'
               '3. Some video formats may not be compatible with optimization\n'
               '4. Very large files (>1GB) may timeout during processing\n'
-              '5. Premium features include enhanced optimization options\n'
-              '6. Try using suggested export settings from the help center\n'
-              '7. Background optimization requires persistent notification permission',
+              '5. Try using suggested export settings',
           'icon': Icons.movie_filter,
         },
         {
           'title': 'Cross-Platform Content Issues',
           'solution': 'If cross-platform content adaptation isn\'t working:\n\n'
-              '1. This feature requires premium subscription\n'
-              '2. Each platform has different aspect ratio requirements\n'
-              '3. Ensure the original video has sufficient resolution for cropping\n'
-              '4. Some content types can\'t be automatically adapted (e.g., text-heavy videos)\n'
-              '5. Manual adjustments may be needed for optimal results\n'
-              '6. Check platform-specific requirements in the help section\n'
-              '7. Use the preview function to verify before posting',
+              '1. Each platform has different aspect ratio requirements\n'
+              '2. Ensure the original video has sufficient resolution for cropping\n'
+              '3. Some content types can\'t be automatically adapted (e.g., text-heavy videos)\n'
+              '4. Manual adjustments may be needed for optimal results\n'
+              '5. Check platform-specific requirements\n'
+              '6. Use the preview function to verify before posting',
           'icon': Icons.devices_other,
         },
         {
@@ -474,10 +413,9 @@ class _TroubleshootingPageState extends State<TroubleshootingPage> with TickerPr
               '1. Ensure video has processed completely\n'
               '2. Check if video format is supported (MP4, MOV recommended)\n'
               '3. Some very short videos (<3 seconds) may have limited thumbnail options\n'
-              '4. Premium users have access to AI-enhanced thumbnails\n'
-              '5. Manual thumbnail upload is always available as an alternative\n'
-              '6. Recommended thumbnail size: 1280x720px (16:9 aspect ratio)\n'
-              '7. For best results, use high contrast scenes from your video',
+              '4. Manual thumbnail upload is always available as an alternative\n'
+              '5. Recommended thumbnail size: 1280x720px (16:9 aspect ratio)\n'
+              '6. For best results, use high contrast scenes from your video',
           'icon': Icons.image,
         },
       ],

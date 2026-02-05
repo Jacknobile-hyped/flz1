@@ -49,6 +49,13 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
   Duration _videoDuration = Duration.zero;
   Timer? _positionUpdateTimer;
   Map<String, dynamic>? _videoDetails;
+  
+  // Carousel related variables for multi-media
+  List<String> _mediaUrls = [];
+  List<bool> _isImageList = [];
+  PageController? _carouselController;
+  int _currentCarouselIndex = 0;
+  String? _currentVideoUrl; // Track current video URL to avoid re-initializing unnecessarily
 
   final Map<String, String> _platformLogos = {
     'twitter': 'assets/loghi/logo_twitter.png',
@@ -82,13 +89,17 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
     
     _loadSocialAccounts();
     _loadVideoDetails().then((_) {
-      if (!_isImage) {
+      // Only initialize player if single media and not an image
+      final hasMultipleMedia = _mediaUrls.length > 1;
+      if (!hasMultipleMedia && !_isImage) {
         _initializePlayer();
       }
-      _startPositionUpdateTimer();
-      setState(() {
-        _showControls = true;
-      });
+      if (!hasMultipleMedia) {
+        _startPositionUpdateTimer();
+        setState(() {
+          _showControls = true;
+        });
+      }
     });
   }
 
@@ -99,6 +110,7 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
     _positionUpdateTimer?.cancel();
     _tabController.dispose();
     _pageController.dispose();
+    _carouselController?.dispose();
     if (_videoPlayerController != null) {
       _videoPlayerController!.removeListener(_onVideoPositionChanged);
       _videoPlayerController!.dispose();
@@ -135,11 +147,155 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
     });
     
     try {
-      // Simply use the video data that was passed in through the widget
+      // Load video data directly from Firebase to ensure we have all fields including cloudflare_urls
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        final videoId = widget.video['id'] as String?;
+        if (videoId != null) {
+          final videoSnapshot = await _database
+              .child('users')
+              .child('users')
+              .child(currentUser.uid)
+              .child('videos')
+              .child(videoId)
+              .get();
+          
+          if (videoSnapshot.exists) {
+            final videoData = videoSnapshot.value as Map<dynamic, dynamic>?;
+            if (videoData != null) {
+              // Convert dynamic map to Map<String, dynamic>
+              final Map<String, dynamic> videoMap = {};
+              videoData.forEach((key, value) {
+                videoMap[key.toString()] = value;
+              });
+              
+              // Load video_paths separately if it exists as a nested list
+              try {
+                final videoPathsSnapshot = await _database
+                    .child('users')
+                    .child('users')
+                    .child(currentUser.uid)
+                    .child('videos')
+                    .child(videoId)
+                    .child('video_paths')
+                    .get();
+                
+                if (videoPathsSnapshot.exists) {
+                  final videoPathsData = videoPathsSnapshot.value;
+                  if (videoPathsData is List) {
+                    // Convert list to List<String>
+                    final List<String> videoPathsList = videoPathsData.map((e) => e.toString()).toList();
+                    videoMap['video_paths'] = videoPathsList;
+                    print('Loaded video_paths from Firebase: ${videoPathsList.length} items');
+                  } else if (videoPathsData is Map) {
+                    // If it's a map (indexed list like 0, 1, 2, ...), convert to list maintaining order
+                    final List<MapEntry<dynamic, dynamic>> entries = videoPathsData.entries.toList();
+                    // Sort by key (convert to int if possible, otherwise use string comparison)
+                    entries.sort((a, b) {
+                      final aKey = a.key;
+                      final bKey = b.key;
+                      if (aKey is int && bKey is int) {
+                        return aKey.compareTo(bKey);
+                      }
+                      final aKeyStr = aKey.toString();
+                      final bKeyStr = bKey.toString();
+                      final aInt = int.tryParse(aKeyStr);
+                      final bInt = int.tryParse(bKeyStr);
+                      if (aInt != null && bInt != null) {
+                        return aInt.compareTo(bInt);
+                      }
+                      return aKeyStr.compareTo(bKeyStr);
+                    });
+                    final List<String> videoPathsList = entries
+                        .where((entry) => entry.value != null)
+                        .map((entry) => entry.value.toString())
+                        .toList();
+                    videoMap['video_paths'] = videoPathsList;
+                    print('Loaded video_paths from Firebase (map format): ${videoPathsList.length} items');
+                  }
+                }
+              } catch (e) {
+                print('Error loading video_paths: $e');
+                // Continue without video_paths if there's an error
+              }
+              
+              setState(() {
+                _videoDetails = videoMap;
+              });
+              
+              print('Loaded video data from Firebase: ${videoMap.keys.toList()}');
+              print('cloudflare_urls in loaded data: ${videoMap['cloudflare_urls']}');
+              print('video_paths in loaded data: ${videoMap['video_paths']}');
+            }
+          }
+        }
+      }
+      
+      // Fallback to widget.video if Firebase load fails
+      if (_videoDetails == null) {
+        setState(() {
+          _videoDetails = widget.video;
+        });
+      }
+      
       setState(() {
-        _videoDetails = widget.video;
         _isLoading = false;
       });
+      
+      // Check if we have cloudflare_urls (carousel) - PRIORITIZE cloudflare_urls over cloudflare_url
+      // Use _videoDetails if available, otherwise widget.video
+      final videoDataToCheck = _videoDetails ?? widget.video;
+      final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+      
+      print('Checking cloudflare_urls - videoDataToCheck keys: ${videoDataToCheck.keys.toList()}');
+      print('cloudflare_urls type: ${cloudflareUrls.runtimeType}, value: $cloudflareUrls');
+      
+      if (cloudflareUrls != null && cloudflareUrls.isNotEmpty) {
+        print('Found cloudflare_urls with ${cloudflareUrls.length} items');
+        // Populate media lists
+        _mediaUrls = cloudflareUrls.cast<String>();
+        
+        // Determine which are images and which are videos
+        // Since we can't download and check files, we'll use heuristics:
+        // - Check URL extensions or default to video if no extension info
+        // - For now, assume all are videos unless we have explicit image info
+        _isImageList = List.generate(_mediaUrls.length, (index) {
+          final url = _mediaUrls[index].toLowerCase();
+          // Simple heuristic: check if URL contains image extensions
+          return url.contains('.jpg') || 
+                 url.contains('.jpeg') || 
+                 url.contains('.png') || 
+                 url.contains('.gif') ||
+                 url.contains('.webp') ||
+                 url.contains('.bmp') ||
+                 url.contains('.heic') ||
+                 url.contains('.heif');
+        });
+        
+        print('Populated _mediaUrls with ${_mediaUrls.length} items, isImageList: $_isImageList');
+        
+        // Initialize carousel controller if we have cloudflare_urls (even with 1 item to avoid conflicts with cloudflare_url)
+        if (_mediaUrls.isNotEmpty) {
+          _carouselController = PageController(initialPage: 0);
+          print('Initialized carousel controller for ${_mediaUrls.length} media');
+        }
+        
+        // Initialize player for first media if it's a video
+        if (_mediaUrls.isNotEmpty && !_isImageList[0]) {
+          // Initialize video player for first video in carousel
+          final firstVideoUrl = _mediaUrls[0];
+          _currentVideoUrl = firstVideoUrl;
+          _initializeNetworkVideoPlayer(firstVideoUrl);
+        } else if (_mediaUrls.isNotEmpty && _isImageList[0]) {
+          // If first media is an image, clear video URL
+          _currentVideoUrl = null;
+        }
+      } else {
+        // Single media - use existing logic
+        print('No cloudflare_urls found, using single media logic');
+        _mediaUrls = [];
+        _isImageList = [];
+      }
       
       // For images, no need to initialize the player
       if (_isImage) {
@@ -1242,13 +1398,30 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                                   padding: EdgeInsets.zero,
                                   tabs: [
                                     Tab(
-                                      icon: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(_isImage ? Icons.image : Icons.video_library, size: 16),
-                                          const SizedBox(width: 8),
-                                          Text(_isImage ? 'Image' : 'Video'),
-                                        ],
+                                      icon: Builder(
+                                        builder: (context) {
+                                          // Use _videoDetails if available, otherwise widget.video
+                                          final videoDataToCheck = _videoDetails ?? widget.video;
+                                          final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+                                          final hasMultipleMedia = cloudflareUrls != null && cloudflareUrls.length > 1;
+                                          return Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                hasMultipleMedia 
+                                                    ? Icons.collections 
+                                                    : (_isImage ? Icons.image : Icons.video_library), 
+                                                size: 16
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                hasMultipleMedia 
+                                                    ? 'Media' 
+                                                    : (_isImage ? 'Image' : 'Video')
+                                              ),
+                                            ],
+                                          );
+                                        },
                                       ),
                                     ),
                                     Tab(
@@ -1361,12 +1534,15 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                           ),
                           child: ElevatedButton(
                             onPressed: () {
+                              // Use _videoDetails if available (contains all Firebase data including video_paths),
+                              // otherwise fallback to widget.video
+                              final draftDataToPass = _videoDetails ?? widget.video;
                               Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => UploadVideoPage(
-                                    draftData: widget.video,
-                                    draftId: widget.video['id'],
+                                    draftData: draftDataToPass,
+                                    draftId: draftDataToPass['id'],
                                   ),
                                 ),
                               );
@@ -1533,11 +1709,19 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
           for (var account in platformAccounts) {
             if (account is Map) {
               final username = account['username']?.toString() ?? '';
-              
+              final accountId = account['id']?.toString() ??
+                  account['channel_id']?.toString() ??
+                  username;
+              final customTitle = account['title']?.toString();
+              final customDescription = account['description']?.toString();
+
               processedAccounts.add({
+                'id': accountId,
                 'username': username,
                 'display_name': account['display_name']?.toString(),
                 'profile_image_url': account['profile_image_url']?.toString(),
+                'title': customTitle,
+                'description': customDescription,
               });
             }
           }
@@ -1695,7 +1879,9 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                         platform.toUpperCase(),
                         style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: _getPlatformColor(platform),
+                            color: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                ? Colors.white
+                                : _getPlatformColor(platform),
                         ),
                       ),
                     ],
@@ -1708,6 +1894,7 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                   // List of accounts for this platform
                 ...platformAccounts.map((account) {
                     final username = account['username']?.toString() ?? '';
+                    final customTitle = account['title']?.toString();
                     
                     return Container(
                       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -1801,7 +1988,9 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                           onPressed: () => _showPostDetailsBottomSheet(context, account, platform),
                           icon: Icon(Icons.info_outline, size: 20),
                           style: IconButton.styleFrom(
-                            foregroundColor: _getPlatformColor(platform),
+                            foregroundColor: (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+                                ? Colors.white
+                                : _getPlatformColor(platform),
                             backgroundColor: _getPlatformLightColor(platform),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -2036,14 +2225,23 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
   // Funzione per mostrare la tendina con i dettagli del post
   void _showPostDetailsBottomSheet(BuildContext context, Map<String, dynamic> account, String platform) {
     final theme = Theme.of(context);
-    final platformColor = _getPlatformColor(platform);
+    final platformColor = (platform.toLowerCase() == 'threads' && theme.brightness == Brightness.dark)
+        ? Colors.white
+        : _getPlatformColor(platform);
     
     // Estrai i dati del post
     final username = account['username'] as String? ?? '';
     final displayName = account['display_name'] as String? ?? username;
     final profileImageUrl = account['profile_image_url'] as String?;
-    final title = widget.video['title'] as String? ?? '';
+    final accountTitle = account['title']?.toString() ?? '';
+    final accountDescription = account['description']?.toString() ?? '';
+    final title = accountTitle.isNotEmpty
+        ? accountTitle
+        : widget.video['title'] as String? ?? '';
     final description = widget.video['description'] as String? ?? '';
+    final resolvedDescription = accountDescription.isNotEmpty
+        ? accountDescription
+        : description;
     
     showModalBottomSheet(
       context: context,
@@ -2250,8 +2448,8 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                       child: Text(
-                        description.isNotEmpty 
-                            ? description 
+                          resolvedDescription.isNotEmpty 
+                              ? resolvedDescription 
                             : 'No description available',
                         style: theme.textTheme.bodyMedium,
                       ),
@@ -2266,8 +2464,345 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
     );
   }
 
+  // Handle carousel page change
+  void _onCarouselPageChanged(int index) {
+    setState(() {
+      _currentCarouselIndex = index;
+    });
+    
+    // Dispose previous video player if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+      _isVideoInitialized = false;
+      _currentVideoUrl = null;
+    }
+    
+    // Reset controls
+    setState(() {
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    // Initialize video player for current media if it's a video
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    if (cloudflareUrls != null && index < cloudflareUrls.length) {
+      final mediaUrl = cloudflareUrls[index] as String?;
+      if (mediaUrl != null) {
+        // Check if it's a video (not an image)
+        final isImage = mediaUrl.toLowerCase().contains('.jpg') || 
+                       mediaUrl.toLowerCase().contains('.jpeg') || 
+                       mediaUrl.toLowerCase().contains('.png') || 
+                       mediaUrl.toLowerCase().contains('.gif') ||
+                       mediaUrl.toLowerCase().contains('.webp') ||
+                       mediaUrl.toLowerCase().contains('.bmp') ||
+                       mediaUrl.toLowerCase().contains('.heic') ||
+                       mediaUrl.toLowerCase().contains('.heif');
+        
+        if (!isImage) {
+          // Initialize video player for this URL
+          _currentVideoUrl = mediaUrl;
+          _initializeNetworkVideoPlayer(mediaUrl);
+        } else {
+          // If it's an image, clear video URL
+          _currentVideoUrl = null;
+        }
+      }
+    }
+  }
+  
+  // Build video player widget for network URL
+  Widget _buildVideoPlayerWidget(String videoUrl, ThemeData theme, bool isFirstVideo) {
+    // Show loading state while video is initializing or if URL doesn't match
+    if (!_isVideoInitialized || 
+        _videoPlayerController == null || 
+        _currentVideoUrl != videoUrl) {
+      // Show thumbnail while loading only for first video
+      final thumbnailUrl = isFirstVideo 
+          ? (_videoDetails?['thumbnail_cloudflare_url'] as String?) 
+          : null;
+      
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          // Show thumbnail if available (only for first video)
+          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+            Center(
+              child: Image.network(
+                thumbnailUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (context, url, error) => Container(
+                  color: Colors.black,
+                ),
+              ),
+            )
+          else
+            Container(
+              color: Colors.black,
+            ),
+          
+          // Loading overlay
+          Container(
+            color: Colors.black.withOpacity(0.3),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Loading video...',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    
+    // Show video player
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Video Player
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _showControls = !_showControls;
+            });
+          },
+          child: _buildVideoPlayer(_videoPlayerController!),
+        ),
+        
+        // Video Controls (same as single video)
+        AnimatedOpacity(
+          opacity: _showControls ? 1.0 : 0.0,
+          duration: Duration(milliseconds: 300),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isSmallScreen = constraints.maxHeight < 300;
+              
+              return Stack(
+                children: [
+                  // Overlay semi-trasparente
+                  Container(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.3),
+                          Colors.transparent,
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.4),
+                        ],
+                        stops: [0.0, 0.2, 0.8, 1.0],
+                      ),
+                    ),
+                  ),
+                  
+                  // Pulsante Play/Pause al centro
+                  Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          _videoPlayerController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                          color: Colors.white,
+                          size: isSmallScreen ? 32 : 40,
+                        ),
+                        padding: EdgeInsets.all(isSmallScreen ? 6 : 8),
+                        onPressed: () {
+                          _toggleVideoPlayback();
+                        },
+                      ),
+                    ),
+                  ),
+                  
+                  // Controlli in basso (slider e tempo)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: EdgeInsets.only(top: 20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.6),
+                            Colors.black.withOpacity(0.2),
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, 0.5, 1.0],
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Time indicators
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(_currentPosition),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  _formatDuration(_videoDuration),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Progress bar
+                          SliderTheme(
+                            data: SliderThemeData(
+                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: isSmallScreen ? 3 : 5),
+                              trackHeight: isSmallScreen ? 2 : 3,
+                              trackShape: RoundedRectSliderTrackShape(),
+                              activeTrackColor: Colors.white,
+                              inactiveTrackColor: Colors.white.withOpacity(0.3),
+                              thumbColor: Colors.white,
+                              overlayColor: theme.colorScheme.primary.withOpacity(0.3),
+                            ),
+                            child: Slider(
+                              value: _currentPosition.inSeconds.toDouble(),
+                              min: 0.0,
+                              max: _videoDuration.inSeconds.toDouble() > 0 
+                                  ? _videoDuration.inSeconds.toDouble() 
+                                  : 1.0,
+                              onChanged: (value) {
+                                _videoPlayerController?.seekTo(Duration(seconds: value.toInt()));
+                                setState(() {
+                                  _showControls = true;
+                                });
+                              },
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+  
+  // Initialize network video player
+  Future<void> _initializeNetworkVideoPlayer(String videoUrl) async {
+    // Dispose previous controller if exists
+    if (_videoPlayerController != null) {
+      _videoPlayerController!.removeListener(_onVideoPositionChanged);
+      _videoPlayerController!.pause();
+      _videoPlayerController!.dispose();
+      _videoPlayerController = null;
+    }
+    
+    setState(() {
+      _isVideoInitialized = false;
+      _showControls = true;
+      _isPlaying = false;
+    });
+    
+    try {
+      print('Initializing network video player for URL: $videoUrl');
+      
+      // Create network video controller
+      _videoPlayerController = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: false,
+        ),
+      );
+      
+      // Add listener for position updates
+      _videoPlayerController!.addListener(_onVideoPositionChanged);
+      
+      // Initialize the controller
+      await _videoPlayerController!.initialize();
+      
+      if (!mounted || _isDisposed) return;
+      
+      setState(() {
+        _isVideoInitialized = true;
+        _videoDuration = _videoPlayerController!.value.duration;
+        _currentPosition = Duration.zero;
+        _showControls = true;
+        _currentVideoUrl = videoUrl; // Set current video URL
+      });
+      
+      print('Network video player initialized successfully for URL: $videoUrl');
+    } catch (e) {
+      print('Error initializing network video player: $e');
+      
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isVideoInitialized = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load video: ${e.toString().substring(0, min(e.toString().length, 50))}...'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   // Metodo per costruire la sezione video
   Widget _buildVideoSection(ThemeData theme, double mediaWidth, Color videoBackgroundColor) {
+    // Check if we have cloudflare_urls - prioritize cloudflare_urls over cloudflare_url
+    // Use carousel even if there's only 1 item in cloudflare_urls to avoid conflicts with cloudflare_url
+    // Use _videoDetails if available, otherwise widget.video
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    final bool hasCloudflareUrls = cloudflareUrls != null && cloudflareUrls.isNotEmpty;
+    final bool hasMultipleMedia = hasCloudflareUrls && cloudflareUrls!.length > 1;
+    
+    print('_buildVideoSection - videoDataToCheck keys: ${videoDataToCheck.keys.toList()}');
+    print('_buildVideoSection - cloudflareUrls: $cloudflareUrls');
+    print('_buildVideoSection - hasCloudflareUrls: $hasCloudflareUrls, hasMultipleMedia: $hasMultipleMedia');
+    
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -2279,12 +2814,14 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
             child: GestureDetector(
               onTap: () {
                 print("Tap on video section container");
-                if (!_isImage && (_videoPlayerController == null || !_isVideoInitialized)) {
-                  _toggleVideoPlayback();
-                } else if (!_isImage && _isVideoInitialized) {
-                  setState(() {
-                    _showControls = !_showControls;
-                  });
+                if (!hasCloudflareUrls) {
+                  if (!_isImage && (_videoPlayerController == null || !_isVideoInitialized)) {
+                    _toggleVideoPlayback();
+                  } else if (!_isImage && _isVideoInitialized) {
+                    setState(() {
+                      _showControls = !_showControls;
+                    });
+                  }
                 }
               },
               child: Container(
@@ -2302,10 +2839,12 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  children: [
-                    // If it's an image, display it directly
-                    if (_isImage)
+                child: hasCloudflareUrls
+                    ? _buildCarouselMediaPreview(theme)
+                    : Stack(
+                        children: [
+                          // If it's an image, display it directly
+                          if (_isImage)
                       Center(
                         child: _videoDetails?['video_path'] != null && 
                              _videoDetails!['video_path'].toString().isNotEmpty
@@ -2585,6 +3124,167 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
     );
   }
 
+  // Build carousel media preview
+  Widget _buildCarouselMediaPreview(ThemeData theme) {
+    // Get media URLs directly from _videoDetails or widget if _mediaUrls is empty (async loading)
+    // Use _videoDetails if available, otherwise widget.video
+    final videoDataToCheck = _videoDetails ?? widget.video;
+    final cloudflareUrls = videoDataToCheck['cloudflare_urls'] as List<dynamic>?;
+    final mediaUrlsToUse = _mediaUrls.isNotEmpty 
+        ? _mediaUrls 
+        : (cloudflareUrls != null ? cloudflareUrls.cast<String>() : <String>[]);
+    
+    print('_buildCarouselMediaPreview - mediaUrlsToUse.length: ${mediaUrlsToUse.length}');
+    print('_buildCarouselMediaPreview - _carouselController: ${_carouselController != null}');
+    
+    // Get image list directly or compute it
+    List<bool> isImageListToUse;
+    if (_isImageList.length == mediaUrlsToUse.length && _isImageList.isNotEmpty) {
+      isImageListToUse = _isImageList;
+    } else {
+      // Compute on the fly
+      isImageListToUse = List.generate(mediaUrlsToUse.length, (index) {
+        final url = mediaUrlsToUse[index].toLowerCase();
+        return url.contains('.jpg') || 
+               url.contains('.jpeg') || 
+               url.contains('.png') || 
+               url.contains('.gif') ||
+               url.contains('.webp') ||
+               url.contains('.bmp') ||
+               url.contains('.heic') ||
+               url.contains('.heif');
+      });
+    }
+    
+    // Ensure carousel controller exists
+    if (_carouselController == null && mediaUrlsToUse.isNotEmpty) {
+      _carouselController = PageController(initialPage: 0);
+      print('Created carousel controller on-the-fly');
+    }
+    
+    return Stack(
+      children: [
+        // Carousel with PageView
+        PageView.builder(
+          controller: _carouselController,
+          onPageChanged: mediaUrlsToUse.length > 1 ? _onCarouselPageChanged : null,
+          itemCount: mediaUrlsToUse.length,
+          itemBuilder: (context, index) {
+            final isImage = index < isImageListToUse.length ? isImageListToUse[index] : false;
+            final mediaUrl = mediaUrlsToUse[index];
+            
+            if (isImage) {
+              // Display image directly
+              return Center(
+                child: Image.network(
+                  mediaUrl,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded / 
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, url, error) => Center(
+                    child: Icon(
+                      Icons.image_not_supported,
+                      color: Colors.grey[400],
+                      size: 48,
+                    ),
+                  ),
+                ),
+              );
+            } else {
+              // For videos, use VideoPlayerController.networkUrl for remote video URLs
+              // Only initialize video player for current carousel index to save memory
+              if (index == _currentCarouselIndex) {
+                // Initialize video player for current video
+                return _buildVideoPlayerWidget(mediaUrl, theme, index == 0);
+              } else {
+                // For non-current videos, show placeholder or thumbnail
+                return Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.video_library,
+                          color: Colors.grey[400],
+                          size: 48,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video ${index + 1}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+        ),
+        
+        // Carousel dot indicators (only show if more than 1 item)
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            bottom: 16,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                mediaUrlsToUse.length,
+                (index) => Container(
+                  margin: EdgeInsets.symmetric(horizontal: 4),
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentCarouselIndex == index
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        
+        // Badge conteggio media in alto a sinistra
+        if (mediaUrlsToUse.length > 1)
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${_currentCarouselIndex + 1}/${mediaUrlsToUse.length}',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   // Metodo per costruire la sezione accounts
   Widget _buildAccountsSection(ThemeData theme) {
     return Container(
@@ -2631,9 +3331,9 @@ class _DraftDetailsPageState extends State<DraftDetailsPage> with SingleTickerPr
       'username': account['username']?.toString() ?? '',
       'displayName': account['display_name']?.toString() ?? account['username']?.toString() ?? '',
       'profileImageUrl': account['profile_image_url']?.toString() ?? '',
-      'id': account['username']?.toString() ?? '', // Use username as ID if no specific ID
-      'channel_id': account['username']?.toString() ?? '', // Use username as channel_id if no specific ID
-      'user_id': account['username']?.toString() ?? '', // Use username as user_id if no specific ID
+      'id': account['id']?.toString() ?? account['username']?.toString() ?? '',
+      'channel_id': account['id']?.toString() ?? account['username']?.toString() ?? '',
+      'user_id': account['id']?.toString() ?? account['username']?.toString() ?? '',
       'followersCount': '0', // Default value since we don't have this info in draft
       'bio': '', // Default empty bio since we don't have this info in draft
       'location': '', // Default empty location since we don't have this info in draft

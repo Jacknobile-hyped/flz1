@@ -12,8 +12,6 @@ import 'package:crypto/crypto.dart';
 import 'package:convert/convert.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'home_page.dart';
 import '../main.dart';
@@ -42,10 +40,6 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
   bool _isSaving = false;
   bool _isUploadingImage = false;
   
-  // Variabili per la geolocalizzazione
-  bool _isLocationPermissionGranted = false;
-  bool _isLocationLoading = false;
-  Map<String, dynamic>? _userLocation;
   
   // Username validation
   bool _isCheckingUsername = false;
@@ -543,95 +537,10 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
     return defaultValue;
   }
 
-  // Mostra una tendina minimal che spiega il motivo della richiesta di localizzazione
-  void _showLocationPermissionSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (BuildContext context) {
-        final theme = Theme.of(context);
-        final isDark = theme.brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          padding: const EdgeInsets.all(20),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[400],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Center(
-                  child: Text(
-                    'Location Permission',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Fluzar uses your location to automatically calculate applicable taxes for your subscriptions and payments. Background location access is necessary to ensure proper application of local tax regulations.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.8),
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFF667eea),
-                          Color(0xFF764ba2),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        transform: GradientRotation(135 * 3.14159 / 180),
-                      ),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        Navigator.pop(context);
-                        await _handleLocationPermission();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        backgroundColor: Colors.transparent,
-                        foregroundColor: Colors.white,
-                        shadowColor: Colors.transparent,
-                      ),
-                      child: const Text('Continue'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   /// Gestisce i permessi di sistema per fotocamera e galleria
   Future<bool> _handleMediaPermissions(ImageSource source) async {
-    PermissionStatus status;
+    PermissionStatus status = PermissionStatus.granted;
     bool isAndroid = false;
     bool isIOS = false;
     
@@ -642,17 +551,34 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
 
     if (source == ImageSource.camera) {
       // Richiedi permesso fotocamera
-      if (isAndroid || isIOS) {
-        status = await Permission.camera.request();
-        if (!status.isGranted) {
-          _showErrorSnackBar('Permesso fotocamera necessario per scattare una foto');
-          return false;
+      if (isIOS) {
+        print('[PERMISSION] iOS: controllo se permesso fotocamera già concesso...');
+        final cameraGranted = await Permission.camera.isGranted;
+        if (cameraGranted) {
+          status = PermissionStatus.granted;
+        } else {
+          print('[PERMISSION] iOS: permesso non concesso, ma lascio che image_picker gestisca la richiesta...');
+          // Su iOS, non richiediamo il permesso qui - lasciamo che image_picker lo gestisca
+          // Questo evita il popup "Permission required" e permette i dialoghi di sistema reali
+          status = PermissionStatus.granted;
         }
+      } else {
+        print('[PERMISSION] Android/Altro: richiedo permesso fotocamera...');
+        status = await Permission.camera.request();
+      }
+      
+      if (!status.isGranted) {
+        if (status.isPermanentlyDenied) {
+          _showErrorSnackBar('Camera permission required to take photos', showSettingsButton: true);
+        } else {
+          _showErrorSnackBar('Camera permission required to take photos');
+        }
+        return false;
       }
     } else {
       // Richiedi permesso galleria/foto
       if (isAndroid) {
-        print('[PERMISSION] Android: controllo permessi galleria...');
+        print('[PERMISSION] Android: richiedo permesso galleria...');
         final photosGranted = await Permission.photos.isGranted;
         final storageGranted = await Permission.storage.isGranted;
         
@@ -666,13 +592,26 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
           }
         }
       } else if (isIOS) {
-        status = await Permission.photos.request();
+        print('[PERMISSION] iOS: controllo se permesso galleria già concesso...');
+        final photosGranted = await Permission.photos.isGranted;
+        if (photosGranted) {
+          status = PermissionStatus.granted;
+        } else {
+          print('[PERMISSION] iOS: permesso non concesso, ma lascio che image_picker gestisca la richiesta...');
+          // Su iOS, non richiediamo il permesso qui - lasciamo che image_picker lo gestisca
+          // Questo evita il popup "Permission required" e permette i dialoghi di sistema reali
+          status = PermissionStatus.granted;
+        }
       } else {
         status = await Permission.photos.request();
       }
       
       if (!status.isGranted) {
-        _showErrorSnackBar('Permesso galleria necessario per selezionare una foto');
+        if (status.isPermanentlyDenied) {
+          _showErrorSnackBar('Gallery permission required to select photos', showSettingsButton: true);
+        } else {
+          _showErrorSnackBar('Gallery permission required to select photos');
+        }
         return false;
       }
     }
@@ -705,14 +644,10 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
             _startProgressNumberAnimation();
           }
         });
-        // Mostra la spiegazione della localizzazione subito dopo la selezione dell'immagine (solo step 3)
-        if (_currentStep == 3 && !_isLocationPermissionGranted) {
-          _showLocationPermissionSheet();
-        }
       }
     } catch (e) {
       print('Error picking profile image: $e');
-      _showErrorSnackBar('Errore nella selezione dell\'immagine profilo');
+      _showErrorSnackBar('Error selecting profile image');
     }
   }
 
@@ -834,7 +769,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
       }
     } catch (e) {
       print('Error uploading profile image: $e');
-      _showErrorSnackBar('Errore nel caricamento dell\'immagine profilo');
+      _showErrorSnackBar('Error uploading profile image');
       return _currentProfileImageUrl;
     } finally {
       setState(() {
@@ -850,19 +785,19 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
 
     // Controlla se l'username è valido
     if (_usernameController.text.trim().isEmpty) {
-      _showErrorSnackBar('Username è obbligatorio');
+      _showErrorSnackBar('Username is required');
       return;
     }
 
     // Controlla se l'username è disponibile
     if (!_isUsernameAvailable) {
-      _showErrorSnackBar('Username non disponibile. Scegline un altro.');
+      _showErrorSnackBar('Username not available. Please choose another one.');
       return;
     }
 
     // Se l'username è in fase di controllo, aspetta
     if (_isCheckingUsername) {
-      _showErrorSnackBar('Attendi il controllo dell\'username...');
+      _showErrorSnackBar('Please wait for username validation...');
       return;
     }
     
@@ -883,12 +818,6 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
         'lastUpdated': DateTime.now().millisecondsSinceEpoch,
         'onboardingCompleted': true, // Marca l'onboarding come completato
       };
-      
-      // Aggiungi i dati di localizzazione se disponibili
-      if (_userLocation != null) {
-        profileData['location'] = _userLocation!; // Usa ! per assicurarti che non sia null
-        profileData['locationUpdatedAt'] = DateTime.now().millisecondsSinceEpoch;
-      }
       
       // Aggiungi l'immagine profilo se presente
       if (profileImageUrl != null) {
@@ -954,7 +883,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
       );
     } catch (e) {
       print('Error saving profile: $e');
-      _showErrorSnackBar('Errore nel salvataggio del profilo');
+      _showErrorSnackBar('Error saving profile');
     } finally {
       setState(() {
         _isSaving = false;
@@ -980,7 +909,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
     );
   }
   
-  void _showErrorSnackBar(String message) {
+  void _showErrorSnackBar(String message, {bool showSettingsButton = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -988,117 +917,52 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
             Icon(Icons.error_outline, color: Colors.white, size: 20),
             SizedBox(width: 12),
             Expanded(child: Text(message)),
+            if (showSettingsButton) ...[
+              SizedBox(width: 8),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () async {
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    await openAppSettings();
+                  },
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      'Settings',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         backgroundColor: Colors.red[600],
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: EdgeInsets.all(16),
+        duration: showSettingsButton ? Duration(seconds: 5) : Duration(seconds: 3),
       ),
     );
   }
   
   /// Gestisce il completamento dello step finale (step 3)
   Future<void> _handleCompleteStep() async {
-    // Se la localizzazione non è stata concessa, richiedila
-    if (!_isLocationPermissionGranted) {
-      bool locationGranted = await _handleLocationPermission();
-      if (locationGranted) {
-        // Se la localizzazione è stata concessa, procedi con il salvataggio
-        await _saveProfile();
-      }
-      // Se non è stata concessa, non fare nulla (l'utente può riprovare)
-    } else {
-      // Se la localizzazione è già stata concessa, procedi direttamente
-      await _saveProfile();
-    }
-  }
-  
-  /// Gestisce i permessi di localizzazione e ottiene la posizione dell'utente
-  Future<bool> _handleLocationPermission() async {
-    setState(() {
-      _isLocationLoading = true;
-    });
-    
-    try {
-      // Controlla se i servizi di localizzazione sono abilitati
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showErrorSnackBar('I servizi di localizzazione sono disabilitati. Abilitali per continuare.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-      
-      // Controlla i permessi di localizzazione
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          _showErrorSnackBar('Permesso di localizzazione negato. È necessario per calcolare le tasse.');
-          setState(() {
-            _isLocationLoading = false;
-          });
-          return false;
-        }
-      }
-      
-      if (permission == LocationPermission.deniedForever) {
-        _showErrorSnackBar('Permesso di localizzazione negato permanentemente. Vai nelle impostazioni per abilitarlo.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-      
-      // Ottieni la posizione corrente
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 10),
-      );
-      
-      // Ottieni l'indirizzo dalla posizione
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-      
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks[0];
-        _userLocation = {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'country': place.country ?? '',
-          'state': place.administrativeArea ?? '',
-          'city': place.locality ?? '',
-          'postalCode': place.postalCode ?? '',
-          'street': place.street ?? '',
-          'address': '${place.street ?? ''}, ${place.locality ?? ''}, ${place.administrativeArea ?? ''}, ${place.postalCode ?? ''}, ${place.country ?? ''}'.trim(),
-        };
-        
-        setState(() {
-          _isLocationPermissionGranted = true;
-          _isLocationLoading = false;
-        });
-        
-        print('Posizione utente ottenuta: $_userLocation');
-        return true;
-      } else {
-        _showErrorSnackBar('Impossibile ottenere l\'indirizzo dalla posizione.');
-        setState(() {
-          _isLocationLoading = false;
-        });
-        return false;
-      }
-    } catch (e) {
-      print('Errore durante l\'ottenimento della posizione: $e');
-      _showErrorSnackBar('Errore durante l\'ottenimento della posizione: $e');
-      setState(() {
-        _isLocationLoading = false;
-      });
-      return false;
-    }
+    await _saveProfile();
   }
 
   void _nextStep() {
@@ -1346,8 +1210,8 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
         return _usernameController.text.trim().isEmpty || 
                !_isUsernameAvailable || 
                _isCheckingUsername;
-      case 3: // Profile Picture - richiede immagine selezionata
-        return _selectedProfileImage == null && (_currentProfileImageUrl == null || _currentProfileImageUrl!.isEmpty);
+      case 3: // Profile Picture - opzionale, sempre abilitato
+        return false;
       default:
         return false;
     }
@@ -1355,13 +1219,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
   
   // Funzione per determinare se il bottone Complete deve essere disabilitato
   bool _isCompleteButtonDisabled() {
-    if (_isSaving || _isLocationLoading) return true;
-    
-    // Per il bottone Complete (step 3), non disabilitare per la localizzazione
-    // Permetti di cliccare per richiedere i permessi
-    if (_currentStep == 3) {
-      return _isButtonDisabled(); // Solo per i campi obbligatori, non per la localizzazione
-    }
+    if (_isSaving) return true;
     
     return _isButtonDisabled();
   }
@@ -1369,8 +1227,6 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
   // Funzione per ottenere il testo del bottone Complete
   String _getCompleteButtonText() {
     if (_isSaving) return 'Setting up...';
-    if (_isLocationLoading) return 'Loading...';
-    if (_currentStep == 3 && !_isLocationPermissionGranted) return 'Complete';
     return _currentStep < 3 ? 'Next' : 'Complete';
   }
 
@@ -1400,7 +1256,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
       case 2:
         return 'Choose a unique username for your profile.';
       case 3:
-        return 'Choose a profile picture that represents you best. This will be displayed on your profile and in your videos.';
+        return 'Choose a profile picture that represents you best. This will be displayed on your profile. (Optional)';
       default:
         return 'Complete your profile setup';
     }
@@ -1984,7 +1840,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           child: Center(
-                                                    child: _isSaving || _isLocationLoading
+                                                    child: _isSaving
                             ? Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2177,8 +2033,8 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
     
     return Column(
       children: [
-        // Spazio sopra per centrare il card (ridotto di 1 cm) - iOS: 45px più in alto
-        SizedBox(height: MediaQuery.of(context).size.height * 0.15 - 40 - (Platform.isIOS ? 45 : 0)),
+        // Spazio sopra per centrare il card (ridotto di 1 cm) - iOS: 65px più in alto, Android: 30px più in alto
+        SizedBox(height: MediaQuery.of(context).size.height * 0.15 - 40 - (Platform.isIOS ? 65 : (Platform.isAndroid ? 30 : 0))),
         
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -2617,7 +2473,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
                 color: Colors.transparent,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(30),
-                      onTap: _showProfileImagePickerDialog,
+                  onTap: _showProfileImagePickerDialog,
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     child: Row(
@@ -2651,7 +2507,7 @@ class _OnboardingProfilePageState extends State<OnboardingProfilePage> with Tick
                             ).createShader(bounds);
                           },
                           child: Text(
-                                'Add Photo',
+                            'Add Photo',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,

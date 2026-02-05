@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 import 'dart:async';
 import 'dart:ui'; // <--- AGGIUNTO per ImageFilter
 import 'social/threads_page.dart';
@@ -26,7 +27,8 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
   List<Map<String, dynamic>> _starNotifications = [];
   bool _isLoading = true;
   String _searchQuery = '';
-  
+  bool _isCommentsLoading = true;
+  bool _isStarsLoading = true;
 
 
   // Stato: tendina commenti aperta
@@ -156,9 +158,21 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
   }
 
   Future<void> _loadCommentNotifications() async {
-    if (_currentUser == null) return;
+    if (_currentUser == null) {
+      if (mounted) {
+        setState(() {
+          _isCommentsLoading = false;
+        });
+      }
+      return;
+    }
 
     try {
+      if (mounted) {
+        setState(() {
+          _isCommentsLoading = true;
+        });
+      }
       final snapshot = await _database
           .child('users')
           .child('users')
@@ -202,28 +216,49 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
         // Sort by timestamp (newest first)
         comments.sort((a, b) => (b['timestamp'] as int).compareTo(a['timestamp'] as int));
 
-        setState(() {
-          _commentNotifications = comments;
-        });
+        if (mounted) {
+          setState(() {
+            _commentNotifications = comments;
+            _isCommentsLoading = false;
+          });
+        }
         
         // Le animazioni verranno inizializzate dinamicamente quando si costruiscono le card
       } else {
-        setState(() {
-          _commentNotifications = [];
-        });
+        if (mounted) {
+          setState(() {
+            _commentNotifications = [];
+            _isCommentsLoading = false;
+          });
+        }
       }
     } catch (e) {
       print('Error loading comment notifications: $e');
-      setState(() {
-        _commentNotifications = [];
-      });
+      if (mounted) {
+        setState(() {
+          _commentNotifications = [];
+          _isCommentsLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _loadStarNotifications() async {
-    if (_currentUser == null) return;
+    if (_currentUser == null) {
+      if (mounted) {
+        setState(() {
+          _isStarsLoading = false;
+        });
+      }
+      return;
+    }
 
     try {
+      if (mounted) {
+        setState(() {
+          _isStarsLoading = true;
+        });
+      }
       final snapshot = await _database
           .child('users')
           .child('users')
@@ -267,24 +302,33 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
         // Sort by timestamp (newest first)
         stars.sort((a, b) => (b['timestamp'] as int).compareTo(a['timestamp'] as int));
 
-        setState(() {
-          _starNotifications = stars;
-        });
+        if (mounted) {
+          setState(() {
+            _starNotifications = stars;
+            _isStarsLoading = false;
+          });
+        }
         
         // Inizializza le animazioni per le nuove star
         for (final star in stars) {
           _initializeStarSlideAnimation(star['id']);
         }
       } else {
-        setState(() {
-          _starNotifications = [];
-        });
+        if (mounted) {
+          setState(() {
+            _starNotifications = [];
+            _isStarsLoading = false;
+          });
+        }
       }
     } catch (e) {
       print('Error loading star notifications: $e');
-      setState(() {
-        _starNotifications = [];
-      });
+      if (mounted) {
+        setState(() {
+          _starNotifications = [];
+          _isStarsLoading = false;
+        });
+      }
     }
   }
 
@@ -2097,6 +2141,56 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
     final commentStars = _starNotifications.where((s) => s['type'] == 'comment_star').length;
     final replyStars = _starNotifications.where((s) => s['type'] == 'reply_star').length;
     
+    if (_isStarsLoading) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: theme.brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.15)
+              : Colors.white.withOpacity(0.25),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: theme.brightness == Brightness.dark
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+              spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+              offset: const Offset(0, 10),
+            ),
+          ],
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark
+                ? [
+                    Colors.white.withOpacity(0.2),
+                    Colors.white.withOpacity(0.1),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.3),
+                    Colors.white.withOpacity(0.2),
+                  ],
+          ),
+        ),
+        child: Center(
+          child: Lottie.asset(
+            'assets/animations/MainScene.json',
+            width: 120,
+            height: 120,
+            fit: BoxFit.contain,
+          ),
+        ),
+      );
+    }
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -2319,6 +2413,56 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
   Widget _buildCommentsCard() {
     final theme = Theme.of(context);
     final unreadComments = _commentNotifications.where((c) => !c['read']).length;
+    
+    if (_isCommentsLoading) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: theme.brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.15)
+              : Colors.white.withOpacity(0.25),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: theme.brightness == Brightness.dark
+                ? Colors.white.withOpacity(0.2)
+                : Colors.white.withOpacity(0.4),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.black.withOpacity(0.4)
+                  : Colors.black.withOpacity(0.15),
+              blurRadius: theme.brightness == Brightness.dark ? 25 : 20,
+              spreadRadius: theme.brightness == Brightness.dark ? 1 : 0,
+              offset: const Offset(0, 10),
+            ),
+          ],
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: theme.brightness == Brightness.dark
+                ? [
+                    Colors.white.withOpacity(0.2),
+                    Colors.white.withOpacity(0.1),
+                  ]
+                : [
+                    Colors.white.withOpacity(0.3),
+                    Colors.white.withOpacity(0.2),
+                  ],
+          ),
+        ),
+        child: Center(
+          child: Lottie.asset(
+            'assets/animations/MainScene.json',
+            width: 120,
+            height: 120,
+            fit: BoxFit.contain,
+          ),
+        ),
+      );
+    }
     
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2681,44 +2825,53 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
             
             // Stars list
             Expanded(
-              child: _getFilteredStars().isEmpty
+              child: _isStarsLoading
                   ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.star_outline,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            'No stars yet',
-                            style: TextStyle(
-                              fontSize: 18,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Stars on your content will appear here',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[500],
-                            ),
-                          ),
-                        ],
+                      child: Lottie.asset(
+                        'assets/animations/MainScene.json',
+                        width: 160,
+                        height: 160,
+                        fit: BoxFit.contain,
                       ),
                     )
-                  : ListView.builder(
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                       itemCount: _getFilteredStars().length,
-                      itemBuilder: (context, index) {
-                         final star = _getFilteredStars()[index];
-                        return _buildStarCardWithAnimation(star);
-                      },
-                    ),
+                  : _getFilteredStars().isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.star_outline,
+                                size: 64,
+                                color: Colors.grey[400],
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'No stars yet',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.grey[600],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Stars on your content will appear here',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: EdgeInsets.symmetric(horizontal: 20),
+                          itemCount: _getFilteredStars().length,
+                          itemBuilder: (context, index) {
+                            final star = _getFilteredStars()[index];
+                            return _buildStarCardWithAnimation(star);
+                          },
+                        ),
             ),
           ],
         ),
@@ -3289,6 +3442,16 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
                     .child('notificationcomment')
                     .onValue,
                 builder: (context, snapshot) {
+                  if (_isCommentsLoading) {
+                    return Center(
+                      child: Lottie.asset(
+                        'assets/animations/MainScene.json',
+                        width: 160,
+                        height: 160,
+                        fit: BoxFit.contain,
+                      ),
+                    );
+                  }
                   if (snapshot.hasError) {
                     return Center(
                       child: Text(
@@ -3834,120 +3997,129 @@ class _NotificationsPageState extends State<NotificationsPage> with TickerProvid
           children: [
             // Main content area - no padding, content can scroll behind floating header
             SafeArea(
-              child: Column(
-                children: [
-                  // Padding trasparente nella parte alta per dare spazio alla top bar flottante
-                  SizedBox(height: 20 + MediaQuery.of(context).size.height * 0.06),
-                  _buildPasswordChangeInfoBox(),
-                  Expanded(
-                    child: (_notifications.isEmpty && _expiringTokens.isEmpty && _commentNotifications.isEmpty && _starNotifications.isEmpty)
-                      ? Center(child: _buildEmptyState())
-                      : SingleChildScrollView(
-                          child: Column(
-                            children: [
-                              // Stars card
-                              if (_starNotifications.isNotEmpty && !_isCommentsSheetOpen && !_isStarsSheetOpen)
-                                _buildStarsCard(),
-                              // Comments card
-                              if (_commentNotifications.isNotEmpty && !_isCommentsSheetOpen && !_isStarsSheetOpen)
-                                _buildCommentsCard(),
-                              // Token expiry warning
-                              _buildTokenExpiryWarning(),
-                              // Notifications count
-                              if (_notifications.isNotEmpty)
-                                Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: theme.colorScheme.outline.withOpacity(0.1),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: _isLoading
+                  ? Center(
+                      child: Lottie.asset(
+                        'assets/animations/MainScene.json',
+                        width: 200,
+                        height: 200,
+                        fit: BoxFit.contain,
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        // Padding trasparente nella parte alta per dare spazio alla top bar flottante
+                        SizedBox(height: 20 + MediaQuery.of(context).size.height * 0.06),
+                        _buildPasswordChangeInfoBox(),
+                        Expanded(
+                          child: (_notifications.isEmpty && _expiringTokens.isEmpty && _commentNotifications.isEmpty && _starNotifications.isEmpty)
+                              ? Center(child: _buildEmptyState())
+                              : SingleChildScrollView(
+                                  child: Column(
                                     children: [
-                                      Text(
-                                        '${_notifications.length} notification${_notifications.length == 1 ? '' : 's'}',
-                                        style: theme.textTheme.titleMedium?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: theme.colorScheme.onSurface,
-                                        ),
-                                      ),
-                                      if (unreadCount > 0)
+                                      // Stars card
+                                      if ((_isStarsLoading || _starNotifications.isNotEmpty) && !_isCommentsSheetOpen && !_isStarsSheetOpen)
+                                        _buildStarsCard(),
+                                      // Comments card
+                                      if ((_isCommentsLoading || _commentNotifications.isNotEmpty) && !_isCommentsSheetOpen && !_isStarsSheetOpen)
+                                        _buildCommentsCard(),
+                                      // Token expiry warning
+                                      _buildTokenExpiryWarning(),
+                                      // Notifications count
+                                      if (_notifications.isNotEmpty)
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                           decoration: BoxDecoration(
-                                            color: theme.colorScheme.primary,
-                                            borderRadius: BorderRadius.circular(16),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: theme.colorScheme.primary.withOpacity(0.3),
-                                                blurRadius: 4,
-                                                offset: const Offset(0, 1),
-                                              ),
-                                            ],
+                                            color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: theme.colorScheme.outline.withOpacity(0.1),
+                                              width: 1,
+                                            ),
                                           ),
                                           child: Row(
-                                            mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Icon(
-                                                Icons.circle,
-                                                size: 8,
-                                                color: Colors.white,
-                                              ),
-                                              const SizedBox(width: 6),
                                               Text(
-                                                '$unreadCount unread',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 12,
+                                                '${_notifications.length} notification${_notifications.length == 1 ? '' : 's'}',
+                                                style: theme.textTheme.titleMedium?.copyWith(
                                                   fontWeight: FontWeight.bold,
+                                                  color: theme.colorScheme.onSurface,
                                                 ),
                                               ),
+                                              if (unreadCount > 0)
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                  decoration: BoxDecoration(
+                                                    color: theme.colorScheme.primary,
+                                                    borderRadius: BorderRadius.circular(16),
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: theme.colorScheme.primary.withOpacity(0.3),
+                                                        blurRadius: 4,
+                                                        offset: const Offset(0, 1),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons.circle,
+                                                        size: 8,
+                                                        color: Colors.white,
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Text(
+                                                        '$unreadCount unread',
+                                                        style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
                                             ],
                                           ),
                                         ),
+                                      // Notifications list
+                                      ListView.builder(
+                                        shrinkWrap: true,
+                                        physics: const NeverScrollableScrollPhysics(),
+                                        padding: const EdgeInsets.only(bottom: 16),
+                                        itemCount: _notifications.where((notification) {
+                                          if (_searchQuery.isEmpty) return true;
+                                          final query = _searchQuery.toLowerCase();
+                                          final title = (notification['title'] as String).toLowerCase();
+                                          final message = (notification['message'] as String).toLowerCase();
+                                          final type = (notification['type'] as String).toLowerCase();
+                                          return title.contains(query) ||
+                                              message.contains(query) ||
+                                              type.contains(query);
+                                        }).length,
+                                        itemBuilder: (context, index) {
+                                          final filteredNotifications = _notifications.where((notification) {
+                                            if (_searchQuery.isEmpty) return true;
+                                            final query = _searchQuery.toLowerCase();
+                                            final title = (notification['title'] as String).toLowerCase();
+                                            final message = (notification['message'] as String).toLowerCase();
+                                            final type = (notification['type'] as String).toLowerCase();
+                                            return title.contains(query) ||
+                                                message.contains(query) ||
+                                                type.contains(query);
+                                          }).toList();
+                                          return _buildNotificationCard(filteredNotifications[index], theme);
+                                        },
+                                      ),
                                     ],
                                   ),
                                 ),
-                              // Notifications list
-                              ListView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                padding: const EdgeInsets.only(bottom: 16),
-                                itemCount: _notifications.where((notification) {
-                                  if (_searchQuery.isEmpty) return true;
-                                  final query = _searchQuery.toLowerCase();
-                                  final title = (notification['title'] as String).toLowerCase();
-                                  final message = (notification['message'] as String).toLowerCase();
-                                  final type = (notification['type'] as String).toLowerCase();
-                                  return title.contains(query) || 
-                                         message.contains(query) || 
-                                         type.contains(query);
-                                }).length,
-                                itemBuilder: (context, index) {
-                                  final filteredNotifications = _notifications.where((notification) {
-                                    if (_searchQuery.isEmpty) return true;
-                                    final query = _searchQuery.toLowerCase();
-                                    final title = (notification['title'] as String).toLowerCase();
-                                    final message = (notification['message'] as String).toLowerCase();
-                                    final type = (notification['type'] as String).toLowerCase();
-                                    return title.contains(query) || 
-                                           message.contains(query) || 
-                                           type.contains(query);
-                                  }).toList();
-                                  return _buildNotificationCard(filteredNotifications[index], theme);
-                                },
-                              ),
-                            ],
-                          ),
                         ),
-                  ),
-                ],
-              ),
+                      ],
+                    ),
             ),
             
             // Floating header

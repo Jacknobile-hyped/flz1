@@ -30,8 +30,10 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
   List<Map<String, dynamic>> _videos = [];
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
   bool _showInfo = false;
+  bool _isSearchFocused = false;
   late TabController _tabController;
   
   // Add calendar related variables
@@ -47,6 +49,23 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
   static const int _postsPerPage = 15;
   bool _hasMorePosts = true;
   bool _isLoadingMore = false;
+  
+  // Variabili per il controllo dello scroll
+  final ScrollController _scrollController = ScrollController();
+  double _searchBarOpacity = 1.0; // 0.0 = completamente nascosta, 1.0 = completamente visibile
+  double _lastScrollOffset = 0;
+  
+  // Variabili per il filtro account espandibile
+  Map<String, bool> _platformExpanded = {}; // Track expanded/collapsed state for platforms
+  List<String> _selectedPlatforms = []; // Track selected platform names (can have multiple now)
+  List<String> _selectedAccounts = []; // Track selected account IDs
+  bool _accountsFilterActive = false; // Track if any account filter is active
+  
+  // Variabili per il filtro per intervallo di date
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _dateFilterActive = false; // Track if date filter is active
+  bool _dateFilterExpanded = false; // Track if date filter section is expanded
 
   @override
   void initState() {
@@ -60,6 +79,10 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
           // Reset pagination when changing tabs
           _currentPage = 1;
           _hasMorePosts = true;
+          // Optionally reset filters when changing tabs
+          // _selectedPlatform = null;
+          // _selectedAccounts.clear();
+          // _accountsFilterActive = false;
         });
       }
     });
@@ -73,6 +96,44 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
       });
     }
     
+    // Listener per il controllo dello scroll
+    _scrollController.addListener(() {
+      if (_scrollController.hasClients) {
+        final offset = _scrollController.offset;
+        
+        // Calcola l'opacità basandosi sull'offset dello scroll
+        // La barra inizia a nascondersi dopo 50px e si nasconde completamente dopo 150px
+        const startHideOffset = 50.0;
+        const endHideOffset = 150.0;
+        
+        double newOpacity;
+        if (offset <= startHideOffset) {
+          newOpacity = 1.0;
+        } else if (offset >= endHideOffset) {
+          newOpacity = 0.0;
+        } else {
+          // Interpolazione lineare tra 1.0 e 0.0
+          newOpacity = 1.0 - (offset - startHideOffset) / (endHideOffset - startHideOffset);
+        }
+        
+        // Aggiorna solo se c'è un cambiamento significativo (per performance)
+        if ((_searchBarOpacity - newOpacity).abs() > 0.01) {
+          setState(() {
+            _searchBarOpacity = newOpacity;
+          });
+        }
+        
+        _lastScrollOffset = offset;
+      }
+    });
+    
+    // Listener per il focus della search bar
+    _searchFocusNode.addListener(() {
+      setState(() {
+        _isSearchFocused = _searchFocusNode.hasFocus;
+      });
+    });
+    
     _initializeVideosListener();
   }
 
@@ -80,6 +141,8 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
   void dispose() {
     _videosSubscription?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
+    _scrollController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -184,6 +247,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
               'video_duration_seconds': videoData['video_duration_seconds'],
               'video_duration_minutes': videoData['video_duration_minutes'],
               'video_duration_remaining_seconds': videoData['video_duration_remaining_seconds'],
+              'cloudflare_urls': videoData['cloudflare_urls'],
             };
           } catch (e) {
             print('Error processing video: $e');
@@ -259,6 +323,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
               'video_duration_seconds': postData['video_duration_seconds'],
               'video_duration_minutes': postData['video_duration_minutes'],
               'video_duration_remaining_seconds': postData['video_duration_remaining_seconds'],
+              'cloudflare_urls': postData['cloudflare_urls'],
             };
           } catch (e) {
             print('Error processing scheduled_post: $e');
@@ -506,8 +571,10 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
             ),
             
             // Floating header with search and tabs
-            Positioned(
-              top: MediaQuery.of(context).size.height * 0.08, // 9% dell'altezza dello schermo
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              top: -100 + (MediaQuery.of(context).size.height * 0.08 + 100) * _searchBarOpacity,
               left: 0,
               right: 0,
               child: Padding(
@@ -515,115 +582,229 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Search bar with glass effect
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(25),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                          height: 42,
-                          decoration: BoxDecoration(
-                            // Effetto vetro sospeso
-                            color: isDark 
-                                ? Colors.white.withOpacity(0.15) 
-                                : Colors.white.withOpacity(0.25),
+                    // Row with Search bar and Filter button
+                    Row(
+                      children: [
+                        // Search bar with glass effect
+                        Expanded(
+                          flex: _isSearchFocused ? 1 : 1,
+                          child: ClipRRect(
                             borderRadius: BorderRadius.circular(25),
-                            // Bordo con effetto vetro
-                            border: Border.all(
-                              color: isDark 
-                                  ? Colors.white.withOpacity(0.2)
-                                  : Colors.white.withOpacity(0.4),
-                              width: 1,
-                            ),
-                            // Ombre per effetto sospeso
-                            boxShadow: [
-                              BoxShadow(
-                                color: isDark 
-                                    ? Colors.black.withOpacity(0.4)
-                                    : Colors.black.withOpacity(0.15),
-                                blurRadius: isDark ? 25 : 20,
-                                spreadRadius: isDark ? 1 : 0,
-                                offset: const Offset(0, 10),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              child: Container(
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  // Effetto vetro sospeso
+                                  color: isDark 
+                                      ? Colors.white.withOpacity(0.15) 
+                                      : Colors.white.withOpacity(0.25),
+                                  borderRadius: BorderRadius.circular(25),
+                                  // Bordo con effetto vetro
+                                  border: Border.all(
+                                    color: isDark 
+                                        ? Colors.white.withOpacity(0.2)
+                                        : Colors.white.withOpacity(0.4),
+                                    width: 1,
+                                  ),
+                                  // Ombre per effetto sospeso
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: isDark 
+                                          ? Colors.black.withOpacity(0.4)
+                                          : Colors.black.withOpacity(0.15),
+                                      blurRadius: isDark ? 25 : 20,
+                                      spreadRadius: isDark ? 1 : 0,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                    BoxShadow(
+                                      color: isDark 
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.white.withOpacity(0.6),
+                                      blurRadius: 2,
+                                      spreadRadius: -2,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                  // Gradiente sottile per effetto vetro
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: isDark 
+                                        ? [
+                                            Colors.white.withOpacity(0.2),
+                                            Colors.white.withOpacity(0.1),
+                                          ]
+                                        : [
+                                            Colors.white.withOpacity(0.3),
+                                            Colors.white.withOpacity(0.2),
+                                          ],
+                                  ),
+                                ),
+                                child: TextField(
+                                  controller: _searchController,
+                                  focusNode: _searchFocusNode,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _searchQuery = value;
+                                      // Reset pagination when searching
+                                      _currentPage = 1;
+                                      _hasMorePosts = true;
+                                    });
+                                  },
+                                  decoration: InputDecoration(
+                                    hintText: 'Search videos by text...',
+                                    hintStyle: TextStyle(
+                                      color: theme.hintColor,
+                                      fontSize: 13,
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.search,
+                                      color: theme.colorScheme.primary,
+                                      size: 18,
+                                    ),
+                                    border: InputBorder.none,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 0,
+                                    ),
+                                    suffixIcon: _searchQuery.isNotEmpty
+                                      ? IconButton(
+                                          iconSize: 16,
+                                          padding: EdgeInsets.zero,
+                                          icon: const Icon(Icons.clear, size: 16),
+                                          onPressed: () {
+                                            _searchController.clear();
+                                            setState(() {
+                                              _searchQuery = '';
+                                              // Reset pagination when clearing search
+                                              _currentPage = 1;
+                                              _hasMorePosts = true;
+                                            });
+                                          },
+                                          color: theme.hintColor,
+                                        )
+                                      : null,
+                                    isDense: true,
+                                    isCollapsed: false,
+                                    alignLabelWithHint: true,
+                                  ),
+                                  textAlignVertical: TextAlignVertical.center,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: theme.textTheme.bodyMedium?.color,
+                                  ),
+                                ),
                               ),
-                              BoxShadow(
-                                color: isDark 
-                                    ? Colors.white.withOpacity(0.1)
-                                    : Colors.white.withOpacity(0.6),
-                                blurRadius: 2,
-                                spreadRadius: -2,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                            // Gradiente sottile per effetto vetro
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: isDark 
-                                  ? [
-                                      Colors.white.withOpacity(0.2),
-                                      Colors.white.withOpacity(0.1),
-                                    ]
-                                  : [
-                                      Colors.white.withOpacity(0.3),
-                                      Colors.white.withOpacity(0.2),
-                                    ],
-                            ),
-                          ),
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (value) {
-                              setState(() {
-                                _searchQuery = value;
-                                // Reset pagination when searching
-                                _currentPage = 1;
-                                _hasMorePosts = true;
-                              });
-                            },
-                            decoration: InputDecoration(
-                              hintText: 'Search videos by text...',
-                              hintStyle: TextStyle(
-                                color: theme.hintColor,
-                                fontSize: 13,
-                              ),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color: theme.colorScheme.primary,
-                                size: 18,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 0,
-                              ),
-                              suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    iconSize: 16,
-                                    padding: EdgeInsets.zero,
-                                    icon: const Icon(Icons.clear, size: 16),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      setState(() {
-                                        _searchQuery = '';
-                                        // Reset pagination when clearing search
-                                        _currentPage = 1;
-                                        _hasMorePosts = true;
-                                      });
-                                    },
-                                    color: theme.hintColor,
-                                  )
-                                : null,
-                              isDense: true,
-                              isCollapsed: false,
-                              alignLabelWithHint: true,
-                            ),
-                            textAlignVertical: TextAlignVertical.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: theme.textTheme.bodyMedium?.color,
                             ),
                           ),
                         ),
-                      ),
+                        
+                        // Spacing between search and filter (animated)
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: _isSearchFocused ? 0 : 12,
+                        ),
+                        
+                        // Filter button (animated)
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOutCubic,
+                          width: _isSearchFocused ? 0 : 42,
+                          height: _isSearchFocused ? 0 : 42,
+                          child: _isSearchFocused
+                              ? const SizedBox.shrink()
+                              : GestureDetector(
+                          onTap: () {
+                            _showPlatformFilterMenu(context);
+                          },
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(25),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              child: Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: isDark 
+                                      ? Colors.white.withOpacity(0.15) 
+                                      : Colors.white.withOpacity(0.25),
+                                  borderRadius: BorderRadius.circular(25),
+                                  border: Border.all(
+                                    color: isDark 
+                                        ? Colors.white.withOpacity(0.2)
+                                        : Colors.white.withOpacity(0.4),
+                                    width: 1,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: isDark 
+                                          ? Colors.black.withOpacity(0.4)
+                                          : Colors.black.withOpacity(0.15),
+                                      blurRadius: isDark ? 25 : 20,
+                                      spreadRadius: isDark ? 1 : 0,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                    BoxShadow(
+                                      color: isDark 
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.white.withOpacity(0.6),
+                                      blurRadius: 2,
+                                      spreadRadius: -2,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: isDark 
+                                        ? [
+                                            Colors.white.withOpacity(0.2),
+                                            Colors.white.withOpacity(0.1),
+                                          ]
+                                        : [
+                                            Colors.white.withOpacity(0.3),
+                                            Colors.white.withOpacity(0.2),
+                                          ],
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.filter_list,
+                                        color: (_selectedPlatforms.isNotEmpty || _accountsFilterActive || _dateFilterActive)
+                                            ? theme.colorScheme.primary 
+                                            : theme.iconTheme.color,
+                                        size: 20,
+                                      ),
+                                      if (_selectedPlatforms.isNotEmpty || _accountsFilterActive || _dateFilterActive)
+                                        Positioned(
+                                          top: 2,
+                                          right: 2,
+                                          child: Container(
+                                            width: 8,
+                                            height: 8,
+                                            decoration: BoxDecoration(
+                                              color: Color(0xFF667eea),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: isDark ? Color(0xFF121212) : Colors.white,
+                                                width: 1.5,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                                ),
+                        ),
+                      ],
                     ),
                     
                     const SizedBox(height: 12),
@@ -924,6 +1105,118 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
       }).toList();
     }
 
+    // Apply date range filter
+    if (_dateFilterActive && _startDate != null && _endDate != null) {
+      filteredVideos = filteredVideos.where((video) {
+        // Get video timestamp
+        final videoId = video['id']?.toString();
+        final userId = video['user_id']?.toString();
+        final isNewFormat = videoId != null && userId != null && videoId.contains(userId);
+        
+        int timestamp;
+        if (isNewFormat) {
+          // Per il nuovo formato: usa scheduled_time, fallback a created_at, poi timestamp
+          timestamp = video['scheduled_time'] as int? ?? 
+                     (video['created_at'] is int ? video['created_at'] : int.tryParse(video['created_at']?.toString() ?? '') ?? 0) ??
+                     (video['timestamp'] is int ? video['timestamp'] : int.tryParse(video['timestamp'].toString()) ?? 0);
+        } else {
+          // Per il vecchio formato: usa timestamp
+          timestamp = video['timestamp'] is int ? video['timestamp'] : int.tryParse(video['timestamp'].toString()) ?? 0;
+        }
+        
+        if (timestamp == 0) return false;
+        
+        final videoDate = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        final dateOnly = DateTime(videoDate.year, videoDate.month, videoDate.day);
+        final startDateOnly = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+        final endDateOnly = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+        
+        // Check if video date is within range (inclusive)
+        return dateOnly.isAtSameMomentAs(startDateOnly) || 
+               dateOnly.isAtSameMomentAs(endDateOnly) ||
+               (dateOnly.isAfter(startDateOnly) && dateOnly.isBefore(endDateOnly));
+      }).toList();
+    }
+
+    // Apply platform or account filter
+    if (_selectedPlatforms.isNotEmpty) {
+      filteredVideos = filteredVideos.where((video) {
+        // Distinzione nuovo/vecchio formato
+        final videoId = video['id']?.toString();
+        final userId = video['user_id']?.toString();
+        final isNewFormat = videoId != null && userId != null && videoId.contains(userId);
+        
+        List<String> platforms;
+        Map<String, dynamic>? accounts;
+        
+        if (isNewFormat && video['accounts'] is Map) {
+          // Nuovo formato: usa le chiavi di accounts
+          accounts = Map<String, dynamic>.from(video['accounts'] as Map);
+          platforms = accounts.keys.map((e) => e.toString()).toList();
+        } else {
+          // Vecchio formato: usa platforms
+          platforms = List<String>.from(video['platforms'] ?? []);
+          // Convert safely from dynamic Map
+          final rawAccounts = video['accounts'];
+          if (rawAccounts is Map) {
+            accounts = Map<String, dynamic>.from(rawAccounts.map((key, value) => MapEntry(key.toString(), value)));
+          } else {
+            accounts = null;
+          }
+        }
+        
+        // Check if any of the selected platforms is in the video's platforms
+        bool hasPlatform = platforms.any((platform) => 
+          _selectedPlatforms.any((selectedPlatform) => 
+            platform.toLowerCase() == selectedPlatform.toLowerCase()
+          )
+        );
+        
+        // If account filtering is active, also check for specific accounts
+        if (_accountsFilterActive && _selectedAccounts.isNotEmpty && accounts != null) {
+          bool hasSelectedAccount = false;
+          
+          // Check accounts for all selected platforms
+          for (final selectedPlatform in _selectedPlatforms) {
+            final platformAccounts = accounts[selectedPlatform];
+            
+            if (platformAccounts != null) {
+              if (platformAccounts is Map) {
+                // Single account
+                final accountId = platformAccounts['account_id']?.toString() ?? 
+                                 platformAccounts['id']?.toString() ?? 
+                                 platformAccounts['username']?.toString() ?? '';
+                if (_selectedAccounts.contains(accountId)) {
+                  hasSelectedAccount = true;
+                  break;
+                }
+              } else if (platformAccounts is List) {
+                // Multiple accounts
+                for (var account in platformAccounts) {
+                  if (account is Map) {
+                    final accountId = account['account_id']?.toString() ?? 
+                                     account['id']?.toString() ?? 
+                                     account['username']?.toString() ?? '';
+                    if (_selectedAccounts.contains(accountId)) {
+                      hasSelectedAccount = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (hasSelectedAccount) break;
+          }
+          
+          // Video must have one of the platforms AND at least one selected account
+          return hasPlatform && hasSelectedAccount;
+        }
+        
+        // If no account filtering, just check platform
+        return hasPlatform;
+      }).toList();
+    }
+
     // Apply tab filter
     filteredVideos = filteredVideos.where((video) {
       final status = video['status'] as String? ?? '';
@@ -993,10 +1286,18 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     // Filtered videos for display
 
     if (filteredVideos.isEmpty) {
-      if (_searchQuery.isNotEmpty) {
-        return Center(
+      // Check if there are any active filters (search, platforms, accounts, dates)
+      bool hasActiveFilters = _searchQuery.isNotEmpty || 
+                              _selectedPlatforms.isNotEmpty || 
+                              _accountsFilterActive || 
+                              _dateFilterActive;
+      
+      if (hasActiveFilters) {
+        return Align(
+          alignment: Alignment.center,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
@@ -1042,7 +1343,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
               ),
               const SizedBox(height: 8),
               Text(
-                'Try different keywords',
+                'Try different keywords or filters',
                 style: TextStyle(
                   fontSize: 14,
                   color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
@@ -1077,6 +1378,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     return RefreshIndicator(
       onRefresh: _refreshVideos,
       child: ListView.builder(
+        controller: _scrollController,
         padding: EdgeInsets.only(
           top: 140 + MediaQuery.of(context).size.height * 0.06, // 140px + 3% dell'altezza dello schermo
           left: 20, 
@@ -1164,30 +1466,69 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     
     // Debug per thumbnail
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      elevation: 2,
-      color: theme.brightness == Brightness.dark ? Color(0xFF1E1E1E) : Colors.white,
-      child: InkWell(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => (video['status'] as String? ?? 'published') == 'draft'
-                  ? DraftDetailsPage(video: video)
-                  : VideoDetailsPage(video: video),
+    final isDark = theme.brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+          decoration: BoxDecoration(
+            // Effetto vetro semi-trasparente opaco
+            color: isDark ? Colors.white.withOpacity(0.12) : Colors.white.withOpacity(0.28),
+            borderRadius: BorderRadius.circular(12),
+            // Bordo con effetto vetro più sottile
+            border: Border.all(
+              color: isDark ? Colors.white.withOpacity(0.18) : Colors.white.withOpacity(0.4),
+              width: 1,
             ),
-          );
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            // Ombre per effetto profondità e vetro
+            boxShadow: [
+              BoxShadow(
+                color: isDark ? Colors.black.withOpacity(0.35) : Colors.black.withOpacity(0.12),
+                blurRadius: isDark ? 22 : 18,
+                spreadRadius: isDark ? 0.5 : 0,
+                offset: const Offset(0, 8),
+              ),
+              BoxShadow(
+                color: isDark ? Colors.white.withOpacity(0.08) : Colors.white.withOpacity(0.55),
+                blurRadius: 2,
+                spreadRadius: -2,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            // Gradiente sottile per effetto vetro
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      Colors.white.withOpacity(0.16),
+                      Colors.white.withOpacity(0.08),
+                    ]
+                  : [
+                      Colors.white.withOpacity(0.34),
+                      Colors.white.withOpacity(0.24),
+                    ],
+            ),
+          ),
+          child: InkWell(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => (video['status'] as String? ?? 'published') == 'draft'
+                      ? DraftDetailsPage(video: video)
+                      : VideoDetailsPage(video: video),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               // Thumbnail
               Container(
                 decoration: BoxDecoration(
@@ -1258,7 +1599,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                         child: Container(
                           padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                           decoration: BoxDecoration(
-                            color: theme.cardColor,
+                            color: isDark ? Colors.white.withOpacity(0.08) : Colors.white.withOpacity(0.9),
                             borderRadius: BorderRadius.circular(8),
                             boxShadow: [
                               BoxShadow(
@@ -1378,7 +1719,9 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                   ],
                 ),
               ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1387,6 +1730,27 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
 
   // Helper method to build platform logos from assets
   Widget _buildPlatformLogo(String platform) {
+    if (platform == 'All') {
+      return Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            transform: GradientRotation(135 * 3.14159 / 180),
+          ),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          Icons.apps,
+          color: Colors.white,
+          size: 16,
+        ),
+      );
+    }
+    
     String logoPath;
     double size = 24; // Slightly smaller size
     
@@ -1494,6 +1858,31 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
   
   // Nuovo metodo per mostrare la durata in modo statico
   Widget _buildStaticDurationBadge(Map<String, dynamic> video) {
+    // Controlla se è un carosello (ha cloudflare_urls con più di una voce)
+    final cloudflareUrls = video['cloudflare_urls'];
+    final bool isCarousel = cloudflareUrls != null && 
+                           (cloudflareUrls is List && (cloudflareUrls as List).length > 1 ||
+                            cloudflareUrls is Map && (cloudflareUrls as Map).length > 1);
+    
+    // Se è un carosello, mostra "CAROUSEL"
+    if (isCarousel) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'CAROUSEL',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
+    
     // Se è un'immagine, mostra "IMG"
     if (video['is_image'] == true) {
       return Container(
@@ -1884,12 +2273,132 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                platforms.contains(query);
       }).toList();
     }
+
+    // Apply date range filter
+    if (_dateFilterActive && _startDate != null && _endDate != null) {
+      filteredVideos = filteredVideos.where((video) {
+        // Get video timestamp
+        final videoId = video['id']?.toString();
+        final userId = video['user_id']?.toString();
+        final isNewFormat = videoId != null && userId != null && videoId.contains(userId);
+        
+        int timestamp;
+        if (isNewFormat) {
+          // Per il nuovo formato: usa scheduled_time, fallback a created_at, poi timestamp
+          timestamp = video['scheduled_time'] as int? ?? 
+                     (video['created_at'] is int ? video['created_at'] : int.tryParse(video['created_at']?.toString() ?? '') ?? 0) ??
+                     (video['timestamp'] is int ? video['timestamp'] : int.tryParse(video['timestamp'].toString()) ?? 0);
+        } else {
+          // Per il vecchio formato: usa timestamp
+          timestamp = video['timestamp'] is int ? video['timestamp'] : int.tryParse(video['timestamp'].toString()) ?? 0;
+        }
+        
+        if (timestamp == 0) return false;
+        
+        final videoDate = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        final dateOnly = DateTime(videoDate.year, videoDate.month, videoDate.day);
+        final startDateOnly = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+        final endDateOnly = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+        
+        // Check if video date is within range (inclusive)
+        return dateOnly.isAtSameMomentAs(startDateOnly) || 
+               dateOnly.isAtSameMomentAs(endDateOnly) ||
+               (dateOnly.isAfter(startDateOnly) && dateOnly.isBefore(endDateOnly));
+      }).toList();
+    }
+
+    // Apply platform or account filter
+    if (_selectedPlatforms.isNotEmpty) {
+      filteredVideos = filteredVideos.where((video) {
+        // Distinzione nuovo/vecchio formato
+        final videoId = video['id']?.toString();
+        final userId = video['user_id']?.toString();
+        final isNewFormat = videoId != null && userId != null && videoId.contains(userId);
+        
+        List<String> platforms;
+        Map<String, dynamic>? accounts;
+        
+        if (isNewFormat && video['accounts'] is Map) {
+          // Nuovo formato: usa le chiavi di accounts
+          accounts = Map<String, dynamic>.from(video['accounts'] as Map);
+          platforms = accounts.keys.map((e) => e.toString()).toList();
+        } else {
+          // Vecchio formato: usa platforms
+          platforms = List<String>.from(video['platforms'] ?? []);
+          // Convert safely from dynamic Map
+          final rawAccounts = video['accounts'];
+          if (rawAccounts is Map) {
+            accounts = Map<String, dynamic>.from(rawAccounts.map((key, value) => MapEntry(key.toString(), value)));
+          } else {
+            accounts = null;
+          }
+        }
+        
+        // Check if any of the selected platforms is in the video's platforms
+        bool hasPlatform = platforms.any((platform) => 
+          _selectedPlatforms.any((selectedPlatform) => 
+            platform.toLowerCase() == selectedPlatform.toLowerCase()
+          )
+        );
+        
+        // If account filtering is active, also check for specific accounts
+        if (_accountsFilterActive && _selectedAccounts.isNotEmpty && accounts != null) {
+          bool hasSelectedAccount = false;
+          
+          // Check accounts for all selected platforms
+          for (final selectedPlatform in _selectedPlatforms) {
+            final platformAccounts = accounts[selectedPlatform];
+            
+            if (platformAccounts != null) {
+              if (platformAccounts is Map) {
+                // Single account
+                final accountId = platformAccounts['account_id']?.toString() ?? 
+                                 platformAccounts['id']?.toString() ?? 
+                                 platformAccounts['username']?.toString() ?? '';
+                if (_selectedAccounts.contains(accountId)) {
+                  hasSelectedAccount = true;
+                  break;
+                }
+              } else if (platformAccounts is List) {
+                // Multiple accounts
+                for (var account in platformAccounts) {
+                  if (account is Map) {
+                    final accountId = account['account_id']?.toString() ?? 
+                                     account['id']?.toString() ?? 
+                                     account['username']?.toString() ?? '';
+                    if (_selectedAccounts.contains(accountId)) {
+                      hasSelectedAccount = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (hasSelectedAccount) break;
+          }
+          
+          // Video must have one of the platforms AND at least one selected account
+          return hasPlatform && hasSelectedAccount;
+        }
+        
+        // If no account filtering, just check platform
+        return hasPlatform;
+      }).toList();
+    }
     
     if (filteredVideos.isEmpty) {
-      if (_searchQuery.isNotEmpty) {
-        return Center(
+      // Check if there are any active filters (search, platforms, accounts, dates)
+      bool hasActiveFilters = _searchQuery.isNotEmpty || 
+                              _selectedPlatforms.isNotEmpty || 
+                              _accountsFilterActive || 
+                              _dateFilterActive;
+      
+      if (hasActiveFilters) {
+        return Align(
+          alignment: Alignment.center,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
@@ -1925,7 +2434,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                   ).createShader(bounds);
                 },
                 child: Text(
-                  'No result',
+                  'No results found',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -1935,7 +2444,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
               ),
               const SizedBox(height: 8),
               Text(
-                'Search by date or text-description',
+                'Try different keywords or filters',
                 style: TextStyle(
                   fontSize: 14,
                   color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
@@ -1972,15 +2481,16 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
         children: [
           // Container per il selettore settimanale o vista compatta
           AnimatedContainer(
-            duration: Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
+            duration: Duration(milliseconds: 150),
+            curve: Curves.easeOutCubic,
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
             margin: EdgeInsets.only(
-              top: 100 + MediaQuery.of(context).size.height * 0.11, // 100px + 6% dell'altezza dello schermo
+              top: (MediaQuery.of(context).size.height * 0.06 + 20) + 
+                   ((100 + MediaQuery.of(context).size.height * 0.11) - (MediaQuery.of(context).size.height * 0.06 + 20)) * _searchBarOpacity,
               left: 16, 
               right: 16, 
               bottom: 4
-            ), // Reduced top margin to be closer to tabs
+            ),
             height: _isWeekSelectorVisible ? null : 50,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
@@ -2467,7 +2977,13 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     }
     
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 20, left: 16, right: 16, bottom: 88), // Aumentato a 88px (circa 2 cm) per dare più spazio in basso
+      controller: _scrollController,
+      padding: EdgeInsets.only(
+        top: 10 + 10 * _searchBarOpacity, // Riduce il padding quando la search bar è nascosta (10 quando nascosta, 20 quando visibile)
+        left: 16, 
+        right: 16, 
+        bottom: 88
+      ),
       itemCount: videosForSelectedDay.length,
       itemBuilder: (context, index) {
         final video = videosForSelectedDay[index];
@@ -2617,6 +3133,860 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     
     // Total account count
     return totalCount;
+  }
+  
+  /// Shows platform filter menu with expandable accounts
+  void _showPlatformFilterMenu(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    final List<String> platforms = [
+      'All',
+      'YouTube',
+      'TikTok',
+      'Instagram',
+      'Facebook',
+      'Twitter',
+      'Threads',
+    ];
+    
+    // Filter out TikTok and Twitter from display
+    final List<String> visiblePlatforms = platforms.where((platform) => 
+      platform != 'TikTok' && platform != 'Twitter'
+    ).toList();
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+        return ClipRRect(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark 
+                    ? Color(0xFF1E1E1E) 
+                    : Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                border: Border.all(
+                  color: isDark 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.4),
+                  width: 1,
+                ),
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Handle bar
+                    Container(
+                      margin: EdgeInsets.symmetric(vertical: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: theme.dividerColor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    
+                    // Title
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Center(
+                        child: Text(
+                          'Filters',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.textTheme.bodyLarge?.color,
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 8),
+                        
+                        // Date range filter
+                        _buildDateRangeFilter(context, theme, isDark, setModalState),
+                        
+                        const SizedBox(height: 12),
+                    
+                    // Platform list - with flexible height
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: visiblePlatforms.length,
+                        itemBuilder: (context, index) {
+                          final platform = visiblePlatforms[index];
+                          final isSelected = _selectedPlatforms.contains(platform) || 
+                                            (_selectedPlatforms.isEmpty && platform == 'All');
+                              
+                              return _buildPlatformFilterItem(
+                                context, 
+                                theme, 
+                                platform, 
+                                isSelected, 
+                                isDark,
+                                setModalState, // Pass the setModalState function
+                              );
+                            },
+                          ),
+                        ),
+                        
+                        SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+  
+  // New method to build platform filter item with expandable accounts
+  Widget _buildPlatformFilterItem(
+    BuildContext context,
+    ThemeData theme,
+    String platform,
+    bool isSelectedOriginal,
+    bool isDark,
+    StateSetter setModalState,
+  ) {
+    final isAllPlatform = platform == 'All';
+    final isExpanded = _platformExpanded[platform] ?? false;
+    
+    // Recalculate if this platform is actually selected
+    final isSelected = isSelectedOriginal || (!isAllPlatform && _selectedPlatforms.contains(platform));
+    
+    return Column(
+      children: [
+        InkWell(
+                            onTap: () {
+                              setState(() {
+                                if (platform == 'All') {
+                _selectedPlatforms.clear();
+                _selectedAccounts.clear();
+                _accountsFilterActive = false;
+                Navigator.pop(context);
+              } else if (isExpanded) {
+                // If already expanded, close it
+                _platformExpanded[platform] = false;
+                                } else {
+                // If not expanded, close all others first, then expand it
+                // Close all platforms first
+                _platformExpanded.forEach((key, value) {
+                  if (value == true) {
+                    _platformExpanded[key] = false;
+                  }
+                });
+                // Now expand this one
+                _platformExpanded[platform] = true;
+                                }
+                                // Reset pagination when filtering
+                                _currentPage = 1;
+                                _hasMorePosts = true;
+                              });
+            setModalState(() {}); // Update the modal state
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                              decoration: BoxDecoration(
+                                color: isSelected 
+                                    ? (isDark ? Color(0xFF667eea).withOpacity(0.1) : Color(0xFF667eea).withOpacity(0.05))
+                                    : Colors.transparent,
+                              ),
+                              child: Row(
+                                children: [
+                                  // Platform logo
+                                  _buildPlatformLogo(platform),
+                                  SizedBox(width: 16),
+                                  
+                                  // Platform name
+                                  Expanded(
+                                    child: Text(
+                                      platform,
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                        color: isSelected 
+                                            ? theme.colorScheme.primary 
+                                            : theme.textTheme.bodyMedium?.color,
+                                      ),
+                                    ),
+                                  ),
+                                  
+                // Platform selection icon or Expand/Collapse icon
+                if (!isAllPlatform)
+                  Row(
+                    children: [
+                      // Platform selection button
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            // Toggle platform selection (multiple platforms allowed)
+                            if (_selectedPlatforms.contains(platform)) {
+                              _selectedPlatforms.remove(platform);
+                            } else {
+                              _selectedPlatforms.add(platform);
+                            }
+                            _selectedAccounts.clear(); // Clear specific account selection
+                            _accountsFilterActive = false;
+                            
+                            // Reset pagination when filtering
+                            _currentPage = 1;
+                            _hasMorePosts = true;
+                          });
+                          setModalState(() {}); // Update the modal state
+                        },
+                        child: Container(
+                          padding: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isSelected ? theme.colorScheme.primary : Colors.transparent,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? theme.colorScheme.primary : theme.dividerColor,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: isSelected
+                              ? Icon(
+                                  Icons.check,
+                                  color: Colors.white,
+                                  size: 14,
+                                )
+                              : Icon(
+                                  Icons.circle_outlined,
+                                  color: theme.iconTheme.color?.withOpacity(0.5),
+                                  size: 14,
+                                ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      // Expand/Collapse button
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            if (isExpanded) {
+                              // If already expanded, close it
+                              _platformExpanded[platform] = false;
+                            } else {
+                              // If not expanded, close all others first, then expand it
+                              // Close all platforms first
+                              _platformExpanded.forEach((key, value) {
+                                if (value == true) {
+                                  _platformExpanded[key] = false;
+                                }
+                              });
+                              // Now expand this one
+                              _platformExpanded[platform] = true;
+                            }
+                          });
+                          setModalState(() {}); // Update the modal state
+                        },
+                        child: Icon(
+                          isExpanded ? Icons.expand_less : Icons.expand_more,
+                          color: theme.iconTheme.color,
+                          size: 24,
+                        ),
+                      ),
+                    ],
+                  ),
+                
+                // Check icon for All (only shown when selected)
+                if (isAllPlatform && isSelected)
+                                    ShaderMask(
+                                      shaderCallback: (Rect bounds) {
+                                        return LinearGradient(
+                                          colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          transform: GradientRotation(135 * 3.14159 / 180),
+                                        ).createShader(bounds);
+                                      },
+                                      child: Icon(
+                                        Icons.check_circle,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+        ),
+        
+        // Expanded accounts list with animation
+        if (!isAllPlatform)
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOutCubic,
+            child: isExpanded
+                ? AnimatedOpacity(
+                    duration: const Duration(milliseconds: 250),
+                    opacity: isExpanded ? 1.0 : 0.0,
+                    child: _buildPlatformAccounts(context, theme, platform, isDark, setModalState),
+                  )
+                : const SizedBox.shrink(),
+          ),
+      ],
+    );
+  }
+  
+  // New method to build date range filter
+  Widget _buildDateRangeFilter(BuildContext context, ThemeData theme, bool isDark, StateSetter setModalState) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        gradient: _dateFilterActive
+            ? LinearGradient(
+                colors: isDark
+                    ? [
+                        Color(0xFF667eea).withOpacity(0.25),
+                        Color(0xFF764ba2).withOpacity(0.25),
+                      ]
+                    : [
+                        Color(0xFF667eea).withOpacity(0.12),
+                        Color(0xFF764ba2).withOpacity(0.12),
+                      ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+        color: _dateFilterActive
+            ? null
+            : (isDark ? Color(0xFF1E1E1E) : Color(0xFFF9F9F9)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _dateFilterActive
+              ? Color(0xFF667eea).withOpacity(0.4)
+              : theme.dividerColor.withOpacity(0.5),
+          width: _dateFilterActive ? 2 : 1.5,
+        ),
+        boxShadow: _dateFilterActive
+            ? [
+                BoxShadow(
+                  color: Color(0xFF667eea).withOpacity(0.2),
+                  blurRadius: 20,
+                  offset: Offset(0, 8),
+                  spreadRadius: 0,
+                ),
+              ]
+            : [],
+      ),
+      child: Container(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _dateFilterExpanded = !_dateFilterExpanded;
+                    });
+                    setModalState(() {});
+                  },
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          gradient: _dateFilterActive
+                              ? LinearGradient(
+                                  colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                              : null,
+                          color: _dateFilterActive
+                              ? null
+                              : (isDark ? Color(0xFF2A2A2A) : Color(0xFFEAEAEA)),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: _dateFilterActive
+                              ? [
+                                  BoxShadow(
+                                    color: Color(0xFF667eea).withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ]
+                              : [],
+                        ),
+                        child: Icon(
+                          Icons.calendar_today_rounded,
+                          size: 20,
+                          color: _dateFilterActive 
+                              ? Colors.white
+                              : theme.iconTheme.color?.withOpacity(0.7),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Date Range',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: _dateFilterActive
+                                    ? theme.colorScheme.primary
+                                    : theme.textTheme.bodyLarge?.color?.withOpacity(0.9),
+                              ),
+                            ),
+                            if (_dateFilterActive && _startDate != null && _endDate != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.primary.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        '${DateFormat('dd MMM').format(_startDate!)} - ${DateFormat('dd MMM yyyy').format(_endDate!)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Expand/Collapse icon
+                      Icon(
+                        _dateFilterExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: theme.iconTheme.color,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      // Clear button (only show when active)
+                      if (_dateFilterActive)
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _startDate = null;
+                              _endDate = null;
+                              _dateFilterActive = false;
+                              _currentPage = 1;
+                              _hasMorePosts = true;
+                            });
+                            setModalState(() {});
+                          },
+                          child: Container(
+                            padding: EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.error.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 20,
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Expandable content with animation
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOutCubic,
+                  child: _dateFilterExpanded
+                      ? AnimatedOpacity(
+                          duration: const Duration(milliseconds: 250),
+                          opacity: 1.0,
+                          child: Column(
+                            children: [
+                              const SizedBox(height: 16),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: isDark ? Color(0xFF151515) : Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: theme.dividerColor.withOpacity(0.3),
+                                  ),
+                                ),
+                                padding: EdgeInsets.all(4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildDateSelector(
+                                        context, theme, isDark, setModalState,
+                                        'From',
+                                        _startDate,
+                                        (date) {
+                                          setState(() {
+                                            _startDate = date;
+                                            if (_startDate != null && _endDate != null) {
+                                              _dateFilterActive = true;
+                                            }
+                                          });
+                                          setModalState(() {});
+                                        },
+                                        maxDate: _endDate,
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 1,
+                                      height: 60,
+                                      color: theme.dividerColor.withOpacity(0.2),
+                                    ),
+                                    Expanded(
+                                      child: _buildDateSelector(
+                                        context, theme, isDark, setModalState,
+                                        'To',
+                                        _endDate,
+                                        (date) {
+                                          setState(() {
+                                            _endDate = date;
+                                            if (_startDate != null && _endDate != null) {
+                                              _dateFilterActive = true;
+                                            }
+                                          });
+                                          setModalState(() {});
+                                        },
+                                        minDate: _startDate,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ),
+          ),
+        ),
+    );
+  }
+
+  Widget _buildDateSelector(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+    StateSetter setModalState,
+    String label,
+    DateTime? selectedDate,
+    Function(DateTime) onDateSelected,
+    {DateTime? minDate, DateTime? maxDate}
+  ) {
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: selectedDate ?? (minDate ?? DateTime.now().subtract(Duration(days: 7))),
+          firstDate: minDate ?? DateTime(2020),
+          lastDate: maxDate ?? DateTime.now(),
+        );
+        if (picked != null) {
+          onDateSelected(picked);
+          setModalState(() {});
+        }
+      },
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: isDark ? Color(0xFF1A1A1A) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    Icons.calendar_today_outlined,
+                    size: 14,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              selectedDate != null
+                  ? DateFormat('MMM dd, yyyy').format(selectedDate!)
+                  : 'Select date',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selectedDate != null
+                    ? theme.textTheme.bodyLarge?.color
+                    : theme.hintColor.withOpacity(0.6),
+              ),
+            ),
+          ],
+            ),
+          ),
+        );
+  }
+  
+  // New method to build accounts list for a platform
+  Widget _buildPlatformAccounts(BuildContext context, ThemeData theme, String platform, bool isDark, StateSetter setModalState) {
+    // Get all unique accounts for this platform from all videos
+    Set<String> accountSet = {};
+    Map<String, Map<String, dynamic>> accountDetails = {};
+    
+    for (var video in _videos) {
+      final videoId = video['id']?.toString();
+      final userId = video['user_id']?.toString();
+      final isNewFormat = videoId != null && userId != null && videoId.contains(userId);
+      
+      List<String> platforms;
+      Map<String, dynamic>? accounts;
+      
+      if (isNewFormat && video['accounts'] is Map) {
+        accounts = Map<String, dynamic>.from(video['accounts'] as Map);
+        platforms = accounts.keys.map((e) => e.toString()).toList();
+      } else {
+        platforms = List<String>.from(video['platforms'] ?? []);
+        // Convert safely from dynamic Map
+        final rawAccounts = video['accounts'];
+        if (rawAccounts is Map) {
+          accounts = Map<String, dynamic>.from(rawAccounts.map((key, value) => MapEntry(key.toString(), value)));
+        } else {
+          accounts = null;
+        }
+      }
+      
+      // Check if this video has the platform
+      if (platforms.any((p) => p.toLowerCase() == platform.toLowerCase()) && accounts != null) {
+        // Get accounts for this platform
+        final rawPlatformAccounts = accounts[platform];
+        
+        if (rawPlatformAccounts != null) {
+          if (rawPlatformAccounts is Map) {
+            // Single account or Map structure - convert to Map<String, dynamic>
+            final platformAccounts = Map<String, dynamic>.from(rawPlatformAccounts.map((key, value) => MapEntry(key.toString(), value)));
+            
+            final accountId = platformAccounts['account_id']?.toString() ?? 
+                             platformAccounts['id']?.toString() ?? 
+                             platformAccounts['username']?.toString() ?? '';
+            
+            if (accountId.isNotEmpty) {
+              accountSet.add(accountId);
+              if (!accountDetails.containsKey(accountId)) {
+                accountDetails[accountId] = {
+                  'display_name': platformAccounts['account_display_name'] ?? 
+                                  platformAccounts['display_name'] ?? 
+                                  platformAccounts['username'] ?? accountId,
+                  'username': platformAccounts['username'] ?? accountId,
+                  'profile_image_url': platformAccounts['account_profile_image_url'] ??
+                                      platformAccounts['profile_image_url'] ??
+                                      platformAccounts['thumbnail_url'],
+                };
+              }
+            }
+          } else if (rawPlatformAccounts is List) {
+            // Multiple accounts
+            for (var account in rawPlatformAccounts) {
+              if (account is Map) {
+                // Convert to Map<String, dynamic>
+                final accountMap = Map<String, dynamic>.from(account.map((key, value) => MapEntry(key.toString(), value)));
+                
+                final accountId = accountMap['account_id']?.toString() ?? 
+                                 accountMap['id']?.toString() ?? 
+                                 accountMap['username']?.toString() ?? '';
+                
+                if (accountId.isNotEmpty) {
+                  accountSet.add(accountId);
+                  if (!accountDetails.containsKey(accountId)) {
+                    accountDetails[accountId] = {
+                      'display_name': accountMap['account_display_name'] ?? 
+                                      accountMap['display_name'] ?? 
+                                      accountMap['username'] ?? accountId,
+                      'username': accountMap['username'] ?? accountId,
+                      'profile_image_url': accountMap['account_profile_image_url'] ??
+                                          accountMap['profile_image_url'] ??
+                                          accountMap['thumbnail_url'],
+                    };
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    final accountList = accountSet.toList();
+    
+    if (accountList.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Text(
+          'No accounts found for $platform',
+          style: TextStyle(
+            fontSize: 13,
+            color: theme.textTheme.bodySmall?.color,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      );
+    }
+    
+    return Container(
+      color: isDark ? Color(0xFF151515) : Colors.grey[50],
+      child: ListView.builder(
+        shrinkWrap: true,
+        physics: NeverScrollableScrollPhysics(),
+        itemCount: accountList.length,
+        itemBuilder: (context, index) {
+          final accountId = accountList[index];
+          final details = accountDetails[accountId] ?? {};
+          final displayName = details['display_name'] ?? accountId;
+          final isAccountSelected = _selectedAccounts.contains(accountId);
+          
+          final profileImageUrl = details['profile_image_url']?.toString();
+          
+          return InkWell(
+            onTap: () {
+              setState(() {
+                if (isAccountSelected) {
+                  _selectedAccounts.remove(accountId);
+                } else {
+                  _selectedAccounts.add(accountId);
+                }
+                
+                // Update filter active state
+                _accountsFilterActive = _selectedAccounts.isNotEmpty;
+                
+                // If no accounts selected, clear platform filter
+                if (_selectedAccounts.isEmpty) {
+                  _selectedPlatforms.clear();
+                  _accountsFilterActive = false;
+                } else {
+                  // Set platform filter when accounts are selected
+                  if (!_selectedPlatforms.contains(platform)) {
+                    _selectedPlatforms.add(platform);
+                  }
+                }
+                
+                // Reset pagination when filtering
+                _currentPage = 1;
+                _hasMorePosts = true;
+              });
+              setModalState(() {}); // Update the modal state
+            },
+            child: Container(
+              padding: const EdgeInsets.only(left: 60, right: 20, top: 12, bottom: 12),
+              decoration: BoxDecoration(
+                color: isAccountSelected
+                    ? (isDark ? Color(0xFF667eea).withOpacity(0.15) : Color(0xFF667eea).withOpacity(0.08))
+                    : Colors.transparent,
+              ),
+              child: Row(
+                children: [
+                  // Profile image
+                  if (profileImageUrl != null && profileImageUrl.isNotEmpty)
+                    Container(
+                      width: 32,
+                      height: 32,
+                      margin: EdgeInsets.only(right: 12),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isAccountSelected
+                              ? theme.colorScheme.primary
+                              : theme.dividerColor,
+                          width: isAccountSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: ClipOval(
+                        child: Image.network(
+                          profileImageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: theme.colorScheme.surfaceVariant,
+                              child: Icon(
+                                Icons.person,
+                                size: 18,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isAccountSelected ? FontWeight.w600 : FontWeight.normal,
+                        color: isAccountSelected
+                            ? theme.colorScheme.primary
+                            : theme.textTheme.bodyMedium?.color,
+                      ),
+                    ),
+                  ),
+                  
+                  // Check icon
+                  if (isAccountSelected)
+                    ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          transform: GradientRotation(135 * 3.14159 / 180),
+                        ).createShader(bounds);
+                      },
+                      child: Icon(
+                        Icons.check_circle,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 
