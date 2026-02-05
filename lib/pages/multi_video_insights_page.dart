@@ -20,7 +20,7 @@ import 'credits_page.dart';
 
 // Servizio ChatGPT per analizzare i video comparati
 class MultiVideoChatGptService {
-  static const String apiKey = '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';
+  static const String apiKey = '';
   static const String apiUrl = 'https://api.openai.com/v1/chat/completions';
 
   Future<String> analyzeMultiVideoStats(
